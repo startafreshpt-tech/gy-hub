@@ -1,5 +1,22 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style id="gate">body{visibility:hidden}</style>
+<script>
+window.addEventListener('DOMContentLoaded',async()=>{
+  try{
+    const c=window.APP_CONFIG||{};
+    const sb=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY);
+    const {data}=await sb.auth.getSession();
+    if(!data.session){location.replace('index.html');return;}
+    const g=document.getElementById('gate'); if(g) g.remove();
+    const bl=document.createElement('a'); bl.href='index.html'; bl.textContent='\u2039 Hub';
+    bl.style.cssText='position:fixed;top:10px;left:12px;z-index:9999;background:#1a3a2a;color:#fff;padding:6px 12px;border-radius:6px;font:600 12px -apple-system,sans-serif;text-decoration:none';
+    document.body.appendChild(bl);
+  }catch(e){const g=document.getElementById('gate'); if(g) g.remove();}
+});
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Membership Milestones Dashboard</title>
 <style>
