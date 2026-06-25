@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Growing Younger — Hub</title>
+<style>
+:root{color-scheme:light}*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f1;color:#1e293b;min-height:100vh}
+.header{background:#1a3a2a;color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.header h1{font-size:17px;font-weight:700}
+.header .right{display:flex;align-items:center;gap:12px}
+.header .who{font-size:12px;opacity:.85}
+.header button{background:rgba(255,255,255,.15);color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer}
+.wrap{max-width:880px;margin:0 auto;padding:24px 18px}
+.lead{font-size:14px;color:#475569;margin-bottom:18px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.tile{display:block;text-decoration:none;color:inherit;background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:20px;transition:box-shadow .15s,transform .15s}
+.tile:hover{box-shadow:0 6px 20px rgba(0,0,0,.08);transform:translateY(-2px)}
+.tile.soon{opacity:.6;pointer-events:none}
+.tile .ic{font-size:30px}
+.tile .t{font-size:16px;font-weight:700;margin-top:10px}
+.tile .d{font-size:13px;color:#64748b;margin-top:4px}
+.tile .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;margin-top:10px}
+.badge.live{background:#dcfce7;color:#166534}.badge.soon{background:#fef3c7;color:#92400e}
+.auth{max-width:360px;margin:70px auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px}
+.auth h2{font-size:18px;margin-bottom:6px}.auth p{font-size:13px;color:#64748b;margin-bottom:16px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.field input{padding:9px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px}
+.btn{background:#1a3a2a;color:#fff;border:none;padding:10px 16px;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer;width:100%}
+.err{color:#b91c1c;font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+const $=s=>document.querySelector(s);
+const TOOLS=[
+  {ic:'🧾',t:'Invoice Reconciliation',d:'Check trainer invoices vs GymMaster sessions, pods, squads, admin & GST.',href:'invoice.html',live:true},
+  {ic:'🏅',t:'Trainerize Milestones',d:'Member milestones, clubs, goals and leaderboard from Trainerize.',href:'milestones.html',live:false},
+  {ic:'📉',t:'Studio Pulse',d:'Churn risk, LTV, tenure and retention signals.',href:'studio-pulse.html',live:false},
+];
+async function init(){
+  if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#root').innerHTML='<div class="auth"><h2>Setup needed</h2><p>Edit config.js.</p></div>';return;}
+  const {data}=await sb.auth.getSession();
+  sb.auth.onAuthStateChange(()=>render());
+  render();
+}
+async function render(){
+  const {data}=await sb.auth.getSession();
+  const user=data.session?.user;
+  if(!user){
+    $('#root').innerHTML=`<div class="auth"><h2>🌿 Growing Younger Hub</h2><p>Sign in to access your tools.</p>
+      <div class="field"><label>Email</label><input id="email" type="email"></div>
+      <div class="field"><label>Password</label><input id="pw" type="password"></div>
+      <button class="btn" onclick="signIn()">Sign in</button><div class="err" id="ae"></div></div>`;
+    return;
+  }
+  $('#root').innerHTML=`
+    <div class="header"><h1>🌿 Growing Younger Hub</h1>
+      <div class="right"><span class="who">${user.email}</span><button onclick="signOut()">Sign out</button></div></div>
+    <div class="wrap">
+      <div class="lead">Choose a tool. You're signed in once for everything.</div>
+      <div class="tiles">${TOOLS.map(x=>`
+        <a class="tile ${x.live?'':'soon'}" href="${x.live?x.href:'#'}">
+          <div class="ic">${x.ic}</div><div class="t">${x.t}</div><div class="d">${x.d}</div>
+          <span class="badge ${x.live?'live':'soon'}">${x.live?'Open':'Coming soon'}</span>
+        </a>`).join('')}</div>
+    </div>`;
+}
+async function signIn(){const{error}=await sb.auth.signInWithPassword({email:$('#email').value.trim(),password:$('#pw').value});if(error)$('#ae').textContent=error.message;}
+async function signOut(){await sb.auth.signOut();}
+init();
+</script>
+</body>
+</html>

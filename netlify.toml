@@ -1,0 +1,8 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+# Scheduled weekly sync (every Monday ~1pm NZT (manual Sync now anytime)).
+# The background function it triggers can run up to 15 minutes.
+[functions."sync-cron"]
+  schedule = "0 1 * * 1"

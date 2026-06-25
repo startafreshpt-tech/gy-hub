@@ -1,0 +1,7 @@
+{
+  "name": "gy-session-reconciliation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-check GymMaster PT sessions against trainer invoices (Netlify + Supabase, dependency-free)."
+}

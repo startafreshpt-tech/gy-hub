@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GY Session Reconciliation</title>
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f1;color:#1e293b}
+.header{background:#1a3a2a;color:#fff;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.header h1{font-size:16px;font-weight:700}
+.header .right{display:flex;align-items:center;gap:10px}
+.header .who{font-size:12px;opacity:.85}
+.header button{background:rgba(255,255,255,.15);color:#fff;border:none;padding:6px 10px;border-radius:6px;font-size:12px;cursor:pointer}
+.tabs{display:flex;gap:2px;padding:8px 12px 0;background:#fff;border-bottom:1px solid #e2e8f0;overflow-x:auto}
+.tab{padding:9px 14px;border:none;background:none;font-size:13px;font-weight:600;color:#64748b;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.tab.active{color:#1a3a2a;border-bottom-color:#1a3a2a}
+.wrap{padding:14px;max-width:1000px;margin:0 auto}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:14px}
+.field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px}
+.field label{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.4px}
+.field input,.field select{padding:9px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:14px;font-family:inherit;width:100%}
+.btn{background:#1a3a2a;color:#fff;border:none;padding:10px 16px;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer}
+.btn:hover{background:#2d5a42}
+.btn.sec{background:#fff;color:#1a3a2a;border:1px solid #cbd5e1}
+.btn.block{width:100%}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px}
+.card .k{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.card .v{font-size:24px;font-weight:700;margin-top:4px}
+.card .sub{font-size:12px;color:#94a3b8;margin-top:2px}
+.panel{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px}
+.panel h3{font-size:14px;margin-bottom:10px}
+.line{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #f1f5f9;font-size:14px;gap:10px}
+.line:last-child{border-bottom:none}
+.line .lbl{color:#334155}
+.line .lbl small{display:block;color:#94a3b8;font-size:11px}
+.line .amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tot{display:flex;justify-content:space-between;padding:12px 0 2px;font-size:16px;font-weight:800;border-top:2px solid #1a3a2a;margin-top:6px}
+.flag{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.f-ok{background:#dcfce7;color:#166534}.f-over{background:#fee2e2;color:#b91c1c}.f-under{background:#dbeafe;color:#1d4ed8}.f-gap{background:#fef3c7;color:#92400e}
+.muted{color:#94a3b8}.small{font-size:12px;color:#64748b}
+.uploadbox{border:2px dashed #cbd5e1;border-radius:10px;padding:18px;text-align:center;background:#fafafa}
+.loading{display:flex;flex-direction:column;align-items:center;padding:50px 20px;color:#64748b}
+.spinner{width:26px;height:26px;border:3px solid #e2e8f0;border-top-color:#1a3a2a;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.auth{max-width:360px;margin:70px auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px}
+.auth h2{font-size:18px;margin-bottom:6px}.auth p{font-size:13px;color:#64748b;margin-bottom:16px}
+.auth .field{margin-bottom:12px}.err{color:#b91c1c;font-size:12px;margin-top:8px}
+.note{font-size:12px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 6px;text-align:left;border-bottom:1px solid #f1f5f9}
+th{font-size:11px;text-transform:uppercase;color:#64748b}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:600px){.field{min-width:100%}.header h1{font-size:15px}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";</script>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+const $=(s,e=document)=>e.querySelector(s);
+const money=n=>'$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt=n=>Number(n||0).toLocaleString();
+const todayISO=()=>new Date().toISOString().slice(0,10);
+const daysAgo=d=>{const x=new Date();x.setDate(x.getDate()-d);return x.toISOString().slice(0,10);};
+const norm=s=>(s||'').toLowerCase().replace(/['’\-\s.]/g,'');
+
+// Admin weekly-hour caps by caseload band (updated when Trainerize caseload syncs)
+const ADMIN_CAP={Caron:1.0,Ethan:2.5,Laura:1.5,Natalie:1.5};
+const GST_TRAINERS=['Gavyn','Ethan','Caron','Laura']; const GST=0.15; // Scott salaried (no GST)
+const CASELOAD={Gavyn:64,Scott:91,Caron:6,Ethan:49,Laura:22,Natalie:24}; // current Trainerize client numbers
+let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
+
+async function init(){
+  if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#root').innerHTML='<div class="auth"><h2>Setup needed</h2><p>Edit public/config.js.</p></div>';return;}
+  const {data}=await sb.auth.getSession();STATE.user=data.session?.user||null;
+  sb.auth.onAuthStateChange((_e,s)=>{STATE.user=s?.user||null;render();});
+  render();
+}
+function renderAuth(){$('#root').innerHTML=`<div class="auth"><h2>🌿 GY Session Reconciliation</h2><p>Sign in to check trainer invoices against GymMaster.</p>
+<div class="field"><label>Email</label><input id="email" type="email"></div>
+<div class="field"><label>Password</label><input id="pw" type="password"></div>
+<button class="btn block" onclick="signIn()">Sign in</button><div class="err" id="ae"></div></div>`;}
+async function signIn(){const{error}=await sb.auth.signInWithPassword({email:$('#email').value.trim(),password:$('#pw').value});if(error)$('#ae').textContent=error.message;}
+async function signOut(){await sb.auth.signOut();}
+
+function render(){
+  if(!STATE.user){renderAuth();return;}
+  $('#root').innerHTML=`<div class="header"><h1>🌿 GY Session Reconciliation</h1>
+   <div class="right"><a href="index.html" style="color:#fff;font-size:12px;opacity:.85;text-decoration:none">‹ Hub</a><span class="who">${STATE.user.email}</span><button onclick="signOut()">Sign out</button></div></div>
+   <div class="tabs">
+     <button class="tab ${STATE.tab==='check'?'active':''}" onclick="setTab('check')">Invoice Check</button>
+     <button class="tab ${STATE.tab==='sessions'?'active':''}" onclick="setTab('sessions')">Sessions</button>
+     <button class="tab ${STATE.tab==='records'?'active':''}" onclick="setTab('records')">Records</button>
+     <button class="tab ${STATE.tab==='coaching'?'active':''}" onclick="setTab('coaching')">Coaching owed</button>
+     <button class="tab ${STATE.tab==='sync'?'active':''}" onclick="setTab('sync')">Sync</button>
+   </div><div class="wrap" id="view"></div>`;
+  if(STATE.tab==='check')viewCheck();
+  if(STATE.tab==='sessions')viewSessions();
+  if(STATE.tab==='records')viewRecords();
+  if(STATE.tab==='coaching')viewCoaching();
+  if(STATE.tab==='sync')viewSync();
+}
+function setTab(t){if(STATE.tab==='check'){const a=$('#trn'),b=$('#from'),c=$('#to');if(a&&b&&c)STATE.check={trainer:a.value,from:b.value,to:c.value};}STATE.tab=t;render();}
+async function loadTrainers(){if(!STATE.trainers.length){const{data}=await sb.from('trainers').select('*').eq('active',true).order('is_contractor',{ascending:false}).order('name');STATE.trainers=data||[];}return STATE.trainers;}
+
+// ---------------- INVOICE CHECK ----------------
+async function viewCheck(){
+  const trainers=await loadTrainers();
+  $('#view').innerHTML=`
+   <div class="controls">
+     <div class="field"><label>Trainer</label><select id="trn">${trainers.map(t=>`<option value="${t.name}" ${(STATE.check&&STATE.check.trainer)===t.name?'selected':''}>${t.name}${t.is_contractor?'':' (internal)'}</option>`).join('')}</select></div>
+     <div class="field"><label>Period start</label><input id="from" type="date" value="${(STATE.check&&STATE.check.from)||daysAgo(14)}"></div>
+     <div class="field"><label>Period end</label><input id="to" type="date" value="${(STATE.check&&STATE.check.to)||todayISO()}"></div>
+     <button class="btn" onclick="genExpected()">Generate expected</button>
+   </div>
+   <div id="out"><div class="note">Pick a contractor and pay period, then <b>Generate expected</b> — the tool builds the invoice GymMaster supports (checked-in 1-on-1s + pods + squads + admin allowance).</div></div>
+   <div class="panel"><h3>Upload a trainer invoice</h3>
+     <div class="uploadbox">
+       <p class="small">Upload the trainer's invoice — <b>.xlsx, .csv or .pdf</b>. Generate the expected invoice above first to get the full comparison; otherwise it just reads their invoiced total.</p>
+       <input type="file" id="invfile" accept=".xlsx,.xls,.csv,.pdf" style="margin-top:10px" onchange="parseInvoice(event)">
+     </div>
+     <div id="cmp"></div>
+   </div>`;
+}
+function weeksBetween(from,to){const d=(new Date(to)-new Date(from))/86400000+1;return Math.max(1,Math.round(d/7));}
+
+async function genExpected(){
+  const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
+  $('#out').innerHTML='<div class="loading"><div class="spinner"></div>Building expected invoice…</div>';
+  const tr=STATE.trainers.find(t=>t.name===trainer)||{};
+  const rate=Number(tr.rate_per_hour||50);
+  const {data:sess}=await sb.from('sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
+  const S=sess||[];
+  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
+  const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind));
+  const oneAttDed=dedupe(oneRows.filter(s=>s.attended)), oneAllDed=dedupe(oneRows);
+  const one$=oneAttDed.reduce((a,s)=>a+(Number(s.billable_minutes||0)/60)*rate,0);
+  const pods=dedupe(S.filter(s=>s.session_kind==='pod'));
+  const pod$=pods.reduce((a,s)=>a+(Number(s.billable_minutes||60)/60)*rate,0);
+  const squads=S.filter(s=>s.session_kind==='squad');
+  const squad$=squads.length*rate;
+  const cap=ADMIN_CAP[trainer]||0, wks=weeksBetween(from,to), adminHrs=cap*wks, admin$=adminHrs*rate;
+  const total=one$+pod$+squad$+admin$;
+  const gstable=GST_TRAINERS.includes(trainer); const gstAmt=gstable?total*GST:0; const grand=total+gstAmt;
+  const perClient={};
+  oneRows.forEach(s=>{const k=s.client_name||'—';(perClient[k]??={slots:new Set(),att:0,amt:0});perClient[k].slots.add(s.session_date+'|'+(s.start_time||''));if(s.attended){perClient[k].att++;perClient[k].amt+=(Number(s.billable_minutes||0)/60)*rate;}});
+  const pcRows=Object.entries(perClient).map(([n,v])=>({n,booked:v.slots.size,att:v.att,amt:v.amt})).sort((a,b)=>b.booked-a.booked);
+  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length};
+  $('#out').innerHTML=`
+   <div class="cards">
+     <div class="card"><div class="k">Expected total</div><div class="v">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
+     <div class="card"><div class="k">1-on-1 checked in</div><div class="v">${oneAttDed.length}</div><div class="sub">of ${oneAllDed.length} booked</div></div>
+     <div class="card"><div class="k">Squads</div><div class="v">${squads.length}</div></div>
+     <div class="card"><div class="k">Admin cap</div><div class="v">${adminHrs}h</div><div class="sub">${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk</div></div>
+   </div>
+   <div style="margin:4px 0 12px"><button class="btn sec" onclick="saveCheck()">💾 Save this check to records</button> <span id="saveMsg" class="small"></span></div>
+   ${oneAllDed.length>oneAttDed.length?`<div class="note">⚠️ ${oneAllDed.length-oneAttDed.length} of ${trainer}'s 1-on-1s were booked but <b>not checked in</b> — so they don't count toward expected. If they happened, ${trainer} needs to check clients in.</div>`:''}
+   <div class="panel"><h3>Expected invoice (what GymMaster supports)</h3>
+     <div class="line"><span class="lbl">1-on-1 coaching <small>${oneAttDed.length} checked-in, by duration</small></span><span class="amt">${money(one$)}</span></div>
+     <div class="line"><span class="lbl">Pods <small>${pods.length} sessions</small></span><span class="amt">${money(pod$)}</span></div>
+     <div class="line"><span class="lbl">Squads <small>${squads.length} × ${money(rate)}</small></span><span class="amt">${money(squad$)}</span></div>
+     <div class="line"><span class="lbl">Admin <small>${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk × ${wks}wk = ${adminHrs}h</small></span><span class="amt">${money(admin$)}</span></div>
+     ${gstable?`<div class="line"><span class="lbl">GST 15%</span><span class="amt">${money(gstAmt)}</span></div>`:''}
+     <div class="tot"><span>Expected total${gstable?' (incl GST)':''}</span><span>${money(grand)}</span></div>
+   </div>
+   <div class="panel" style="overflow-x:auto"><h3>1-on-1 breakdown by client</h3>
+     <table><thead><tr><th>Client</th><th class="num">Booked</th><th class="num">Checked in</th><th class="num">Billable</th></tr></thead>
+     <tbody>${pcRows.map(r=>`<tr><td>${r.n}</td><td class="num">${r.booked}</td><td class="num" style="${r.att<r.booked?'color:#b91c1c;font-weight:700':''}">${r.att}</td><td class="num">${money(r.amt)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No 1-on-1 sessions in this period.</td></tr>'}</tbody></table>
+     <p class="small" style="margin-top:6px">Pods/squads aren't client-specific so aren't listed here. Red "Checked in" = sessions booked but not marked attended (potential over-billing to query).</p>
+   </div>`;
+  renderCompare();
+}
+
+async function parseInvoice(ev){
+  const f=ev.target.files[0];if(!f)return;
+  $('#cmp').innerHTML='<div class="loading"><div class="spinner"></div>Reading invoice…</div>';
+  const name=(f.name||'').toLowerCase();
+  try{
+    if(name.endsWith('.pdf')){
+      const buf=await f.arrayBuffer();
+      const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      let text='';
+      for(let i=1;i<=pdf.numPages;i++){const pg=await pdf.getPage(i);const tc=await pg.getTextContent();text+=tc.items.map(it=>it.str).join(' ')+'\n';}
+      const m=text.match(/total\s+invoiced[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i);
+      STATE.actual={sheet:f.name,invoiced:m?Number(m[1].replace(/,/g,'')):null};
+    }else{
+      const buf=await f.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      let best=null,bestRows=[];
+      wb.SheetNames.forEach(n=>{const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,blankrows:false});if(rows.length>bestRows.length){best=n;bestRows=rows;}});
+      const rows=bestRows.map(r=>r.map(c=>(c==null?'':String(c).trim())));
+      let invoiced=null;
+      rows.forEach(r=>{const j=r.join(' ').toLowerCase();if(j.includes('total invoiced')){const nums=r.map(x=>Number(String(x).replace(/[,$]/g,''))).filter(n=>!isNaN(n)&&n!==0);if(nums.length)invoiced=nums[nums.length-1];}});
+      STATE.actual={sheet:best||f.name,invoiced};
+    }
+    renderCompare();
+  }catch(err){$('#cmp').innerHTML=`<div class="note" style="color:#b91c1c">Could not read that file: ${err.message}. For Google Sheets, try File → Download → CSV or Excel.</div>`;}
+}
+
+function renderCompare(){
+  const a=STATE.actual;if(!a)return;
+  const e=STATE.expected;
+  if(a.invoiced==null){$('#cmp').innerHTML=`<div class="note">Read "<b>${a.sheet}</b>" but couldn't find a "TOTAL INVOICED" figure — check it's the right tab/file.</div>`;return;}
+  if(!e){$('#cmp').innerHTML=`<div class="cards" style="margin-top:14px"><div class="card"><div class="k">They invoiced</div><div class="v">${money(a.invoiced)}</div><div class="sub">${a.sheet}</div></div></div><div class="note">Now click <b>Generate expected</b> above for the same trainer + period to compare.</div>`;return;}
+  const diff=a.invoiced-e.total;
+  let flag,cls;
+  if(Math.abs(diff)<1){flag='Matches expected';cls='f-ok';}
+  else if(diff>0){flag=`${money(diff)} over expected`;cls='f-over';}
+  else{flag=`${money(-diff)} under expected`;cls='f-under';}
+  $('#cmp').innerHTML=`
+   <div class="cards" style="margin-top:14px">
+     <div class="card"><div class="k">They invoiced</div><div class="v">${money(a.invoiced)}</div><div class="sub">${a.sheet}</div></div>
+     <div class="card"><div class="k">Expected</div><div class="v">${money(e.total)}</div></div>
+     <div class="card"><div class="k">Difference</div><div class="v" style="color:${diff>0?'#b91c1c':diff<0?'#1d4ed8':'#166534'}">${diff>0?'+':''}${money(diff)}</div><div class="sub"><span class="flag ${cls}">${flag}</span></div></div>
+   </div>
+   ${diff>1?`<div class="note">Invoice exceeds what GymMaster supports — likely 1-on-1s billed but not checked in (${e.oneBookedCount-e.oneAttCount} booked-but-unmarked this period). Worth querying with ${e.trainer}.</div>`:''}`;
+}
+
+// ---------------- SESSIONS (cost summary + filter) ----------------
+let SESS_DATA=[], SESS_FILTER='__all__';
+function billableCost(rows,rate){
+  let c=0,n=0;const seen=new Set();
+  for(const s of rows){
+    if(s.session_kind==='squad'){c+=rate;n++;continue;}
+    const k=s.trainer_name+'|'+s.session_date+'|'+(s.start_time||'');
+    if(seen.has(k))continue;seen.add(k);
+    if(s.session_kind==='pod'){c+=(Number(s.billable_minutes||60)/60)*rate;n++;continue;}
+    if(s.attended){c+=(Number(s.billable_minutes||0)/60)*rate;n++;}
+  }
+  return {c,n};
+}
+let SESS_FROM=daysAgo(30), SESS_TO=todayISO();
+async function viewSessions(){
+  $('#view').innerHTML=`
+   <div class="controls">
+     <div class="field"><label>From</label><input id="sfrom" type="date" value="${SESS_FROM}"></div>
+     <div class="field"><label>To</label><input id="sto" type="date" value="${SESS_TO}"></div>
+     <button class="btn" onclick="applySessRange()">Apply</button>
+   </div>
+   <div id="sbody"></div>`;
+  loadSessions();
+}
+function applySessRange(){SESS_FROM=$('#sfrom').value;SESS_TO=$('#sto').value;loadSessions();}
+async function loadSessions(){
+  $('#sbody').innerHTML='<div class="loading"><div class="spinner"></div>Loading…</div>';
+  const trainers=await loadTrainers();
+  const rateOf=n=>{const t=trainers.find(x=>x.name===n);return t?Number(t.rate_per_hour||50):50;};
+  const {data}=await sb.from('sessions').select('*').gte('session_date',SESS_FROM).lte('session_date',SESS_TO).order('session_date',{ascending:false});
+  SESS_DATA=data||[];
+  const byT={};SESS_DATA.forEach(s=>{(byT[s.trainer_name||'?']??=[]).push(s);});
+  const summary=Object.entries(byT).map(([name,rows])=>{const r=rateOf(name);const {c,n}=billableCost(rows,r);const gross=GST_TRAINERS.includes(name)?c*(1+GST):c;return {name,n,c:gross};}).sort((a,b)=>b.c-a.c);
+  const totC=summary.reduce((a,x)=>a+x.c,0), totN=summary.reduce((a,x)=>a+x.n,0);
+  const label=`${SESS_FROM} → ${SESS_TO}`;
+  $('#sbody').innerHTML=`
+   <div class="cards">
+     <div class="card"><div class="k">Billable cost</div><div class="v">${money(totC)}</div><div class="sub">${totN} billable sessions · ${label}</div></div>
+     <div class="card"><div class="k">All sessions logged</div><div class="v">${fmt(SESS_DATA.length)}</div><div class="sub">incl. not-checked-in</div></div>
+   </div>
+   <div class="panel" style="overflow-x:auto"><h3>Cost by trainer · ${label}</h3>
+     <table><thead><tr><th>Trainer</th><th class="num">Billable sessions</th><th class="num">Cost</th></tr></thead>
+     <tbody>${summary.map(t=>`<tr><td>${t.name}</td><td class="num">${fmt(t.n)}</td><td class="num">${money(t.c)}</td></tr>`).join('')}
+       <tr style="font-weight:800;border-top:2px solid #1a3a2a"><td>Total</td><td class="num">${fmt(totN)}</td><td class="num">${money(totC)}</td></tr>
+     </tbody></table>
+     <p class="small" style="margin-top:8px">Billable = checked-in 1-on-1s + pods + squads, at each trainer's rate, incl 15% GST for GST-registered trainers (not Scott). Booked-but-unchecked-in sessions aren't counted.</p>
+   </div>
+   <div class="controls"><div class="field"><label>Filter sessions by trainer</label>
+     <select id="sf" onchange="SESS_FILTER=this.value;renderSessList()"><option value="__all__">All trainers</option>${summary.map(t=>`<option value="${t.name}" ${SESS_FILTER===t.name?'selected':''}>${t.name}</option>`).join('')}</select></div></div>
+   <div class="panel" style="overflow-x:auto" id="slist"></div>`;
+  renderSessList();
+}
+
+function renderSessList(){
+  const rows=SESS_FILTER==='__all__'?SESS_DATA:SESS_DATA.filter(s=>s.trainer_name===SESS_FILTER);
+  $('#slist').innerHTML=`<table><thead><tr><th>Date</th><th>Trainer</th><th>Client</th><th>Type</th><th>Att.</th></tr></thead>
+   <tbody>${rows.slice(0,400).map(s=>`<tr><td>${s.session_date}</td><td>${s.trainer_name||''}</td><td>${s.client_name||'—'}</td><td class="small">${s.service_type||s.session_kind}</td><td>${(s.session_kind==='squad'||s.session_kind==='pod')?'✅':(s.attended?'✅':'❌')}</td></tr>`).join('')}</tbody></table>
+   <p class="small" style="margin-top:6px">${rows.length} sessions${rows.length>400?' (showing first 400)':''}.</p>`;
+}
+
+// ---------------- SYNC ----------------
+async function viewSync(){
+  const {data:logs}=await sb.from('sync_log').select('*').order('started_at',{ascending:false}).limit(8);
+  $('#view').innerHTML=`<div class="panel"><h3>GymMaster sync</h3>
+    <p class="small" style="margin-bottom:10px">Pulls sessions, pods, squads + attendance from GymMaster. Runs weekly; or trigger now.</p>
+    <button class="btn" onclick="syncNow()">⟳ Sync now</button> <span id="sm" class="small"></span></div>
+    <div class="panel" style="overflow-x:auto"><table><thead><tr><th>Started</th><th>Status</th><th class="num">Members</th><th class="num">Sessions</th><th>Message</th></tr></thead>
+    <tbody>${(logs||[]).map(l=>`<tr><td class="small">${new Date(l.started_at).toLocaleString('en-NZ')}</td><td>${l.status}</td><td class="num">${fmt(l.members_scanned)}</td><td class="num">${fmt(l.sessions_upserted)}</td><td class="small">${l.message||''}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No syncs logged yet.</td></tr>'}</tbody></table></div>`;
+}
+async function syncNow(){$('#sm').textContent='Started — runs in background a few minutes. Refresh to see progress.';try{await fetch('/.netlify/functions/sync-gymmaster-background',{method:'POST'});}catch(e){$('#sm').textContent='Could not start: '+e.message;}setTimeout(viewSync,5000);}
+
+async function saveCheck(){
+  const e=STATE.expected;if(!e){const el=$('#saveMsg');if(el)el.textContent='Generate expected first.';return;}
+  const a=STATE.actual;const diff=(a&&a.invoiced!=null)?(a.invoiced-e.total):null;
+  const row={trainer_name:e.trainer,period_start:e.from,period_end:e.to,source:'check',status:'reviewed',
+    notes:`Expected ${money(e.total)}`+((a&&a.invoiced!=null)?`; Invoiced ${money(a.invoiced)}; Diff ${money(diff)}`:'; (no invoice uploaded)'),
+    raw_text:JSON.stringify({expected:e.total,invoiced:a?a.invoiced:null,diff,sheet:a?a.sheet:null,oneCheckedIn:e.oneAttCount,oneBooked:e.oneBookedCount}),
+    created_by:STATE.user.email};
+  const {error}=await sb.from('invoices').insert(row);
+  const el=$('#saveMsg');if(el)el.textContent=error?('Save failed: '+error.message):'Saved ✓ (see Records tab)';
+}
+let RECS=[];
+async function viewRecords(){
+  $('#view').innerHTML='<div class="loading"><div class="spinner"></div>Loading records…</div>';
+  const {data}=await sb.from('invoices').select('*').eq('source','check').order('created_at',{ascending:false}).limit(200);
+  RECS=data||[]; renderRecords();
+}
+function renderRecords(){
+  $('#view').innerHTML=`<div class="note">${RECS.length} saved invoice checks (newest first). Open to see detail, Edit to add a status/note, or Delete.</div>
+   <div class="panel" style="overflow-x:auto"><table><thead><tr><th>Saved</th><th>Trainer</th><th>Period</th><th>Result</th><th>Status</th><th></th></tr></thead>
+   <tbody>${RECS.map(r=>`<tr><td class="small">${new Date(r.created_at).toLocaleString('en-NZ')}</td><td>${r.trainer_name}</td><td class="small">${r.period_start} → ${r.period_end}</td><td class="small">${r.notes||''}</td><td class="small">${r.status||''}</td>
+     <td style="white-space:nowrap"><button class="btn sec sm" onclick="recOpen(${r.id})">Open</button> <button class="btn sec sm" onclick="recEdit(${r.id})">Edit</button> <button class="btn sec sm" onclick="recDelete(${r.id})">Delete</button></td></tr>
+     <tr id="rd-${r.id}" class="hidden"><td colspan="6"></td></tr>`).join('')||'<tr><td colspan="6" class="muted">No saved checks yet — run an Invoice Check and click “Save this check”.</td></tr>'}</tbody></table></div>`;
+}
+function recCell(id){const t=document.getElementById('rd-'+id);return t?t.querySelector('td'):null;}
+function recOpen(id){
+  const r=RECS.find(x=>x.id===id);const row=document.getElementById('rd-'+id);if(!row)return;
+  if(!row.classList.contains('hidden')){row.classList.add('hidden');return;}
+  let d={};try{d=JSON.parse(r.raw_text||'{}');}catch(e){}
+  row.classList.remove('hidden');
+  recCell(id).innerHTML=`<div style="padding:10px 6px" class="small">
+    <b>${r.trainer_name}</b> · ${r.period_start} → ${r.period_end} · saved by ${r.created_by||'—'}<br>
+    Expected: <b>${d.expected!=null?money(d.expected):'—'}</b> · Invoiced: <b>${d.invoiced!=null?money(d.invoiced):'—'}</b> · Difference: <b>${d.diff!=null?money(d.diff):'—'}</b><br>
+    ${d.sheet?('Invoice file: '+d.sheet+'<br>'):''}
+    ${d.oneCheckedIn!=null?('1-on-1 checked in: '+d.oneCheckedIn+' of '+d.oneBooked+' booked<br>'):''}
+    Notes: ${r.notes||'—'}</div>`;
+}
+function recEdit(id){
+  const r=RECS.find(x=>x.id===id);const row=document.getElementById('rd-'+id);if(!row)return;
+  row.classList.remove('hidden');
+  recCell(id).innerHTML=`<div style="padding:8px 6px" class="row">
+    <div class="field"><label>Status</label><select id="es-${id}">
+      ${['reviewed','queried','resolved'].map(o=>`<option ${r.status===o?'selected':''}>${o}</option>`).join('')}</select></div>
+    <div class="field" style="flex:2"><label>Notes</label><input id="en-${id}" value="${(r.notes||'').replace(/"/g,'&quot;')}"></div>
+    <button class="btn sm" onclick="recSave(${id})">Save</button> <button class="btn sec sm" onclick="recOpen(${id})">Cancel</button></div>`;
+}
+async function recSave(id){
+  const status=document.getElementById('es-'+id).value, notes=document.getElementById('en-'+id).value;
+  const {error}=await sb.from('invoices').update({status,notes}).eq('id',id);
+  if(error){alert('Save failed: '+error.message);return;}
+  const r=RECS.find(x=>x.id===id);if(r){r.status=status;r.notes=notes;} renderRecords();
+}
+async function recDelete(id){
+  if(!confirm('Delete this saved check? This cannot be undone.'))return;
+  const {error}=await sb.from('invoices').delete().eq('id',id);
+  if(error){alert('Delete failed: '+error.message);return;}
+  RECS=RECS.filter(x=>x.id!==id); renderRecords();
+}
+
+async function viewCoaching(){
+  $('#view').innerHTML=`
+   <div class="controls">
+     <div class="field"><label>From</label><input id="cfrom" type="date" value="${daysAgo(84)}"></div>
+     <div class="field"><label>To</label><input id="cto" type="date" value="${todayISO()}"></div>
+     <button class="btn" onclick="runCoaching()">Check coaching owed</button>
+   </div>
+   <div id="cout"><div class="note">Checks whether clients are getting the coaching their membership entitles them to, over the selected window (default 12 weeks). Compares plan entitlement vs actual checked-in coaching sessions.</div></div>`;
+}
+async function runCoaching(){
+  const from=$('#cfrom').value,to=$('#cto').value,wks=weeksBetween(from,to);
+  $('#cout').innerHTML='<div class="loading"><div class="spinner"></div>Checking entitlements…</div>';
+  const {data:clients}=await sb.from('clients').select('gm_member_id,full_name,membership,coach_weeks,coach_minutes,coach_count').not('coach_weeks','is',null);
+  const {data:sess}=await sb.from('sessions').select('gm_member_id').gte('session_date',from).lte('session_date',to).in('session_kind',['individual','onboard','couple']).eq('attended',true);
+  const del={};(sess||[]).forEach(s=>{del[s.gm_member_id]=(del[s.gm_member_id]||0)+1;});
+  const rows=(clients||[]).map(c=>{
+    const expected=Math.round(wks/Number(c.coach_weeks)*Number(c.coach_count||1));
+    const got=del[c.gm_member_id]||0;
+    return {name:c.full_name||'—',plan:`${(c.coach_count>1?c.coach_count+'×':'')}${c.coach_minutes}min / ${c.coach_weeks}wk`,expected,got,owed:expected-got};
+  }).filter(r=>r.expected>0).sort((a,b)=>b.owed-a.owed);
+  const under=rows.filter(r=>r.owed>0).length;
+  $('#cout').innerHTML=`
+   <div class="cards">
+     <div class="card"><div class="k">Clients with a plan</div><div class="v">${rows.length}</div><div class="sub">${wks}-week window</div></div>
+     <div class="card"><div class="k">Under-served</div><div class="v" style="color:${under?'#b91c1c':'#166534'}">${under}</div><div class="sub">owed coaching sessions</div></div>
+   </div>
+   <div class="panel" style="overflow-x:auto"><h3>Coaching owed — entitlement vs delivered</h3>
+     <table><thead><tr><th>Client</th><th>Plan</th><th class="num">Due</th><th class="num">Delivered</th><th>Status</th></tr></thead>
+     <tbody>${rows.map(r=>`<tr><td>${r.name}</td><td class="small">${r.plan}</td><td class="num">${r.expected}</td><td class="num">${r.got}</td><td>${r.owed>0?`<span class="flag f-over">Owed ${r.owed}</span>`:r.owed<0?`<span class="flag f-under">+${-r.owed} extra</span>`:`<span class="flag f-ok">On track</span>`}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No clients with a coaching plan yet — run a Sync.</td></tr>'}</tbody></table>
+     <p class="small" style="margin-top:6px">Due = sessions the plan entitles them to in this window. Based on checked-in 1-on-1 coaching only. "Owed" = client isn't getting their coaching — worth following up.</p>
+   </div>`;
+}
+
+init();
+</script>
+</body>
+</html>
