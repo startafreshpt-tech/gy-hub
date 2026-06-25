@@ -42,7 +42,7 @@ const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
 const $=s=>document.querySelector(s);
 const TOOLS=[
   {ic:'🧾',t:'Invoice Reconciliation',d:'Check trainer invoices vs GymMaster sessions, pods, squads, admin & GST.',href:'invoice.html',live:true},
-  {ic:'🏅',t:'Trainerize Milestones',d:'Member milestones, clubs, goals and leaderboard from Trainerize.',href:'milestones.html',live:false},
+  {ic:'🏅',t:'Trainerize Milestones',d:'Member milestones, clubs, goals and leaderboard from Trainerize.',href:'milestones.html',live:true},
   {ic:'📉',t:'Studio Pulse',d:'Churn risk, LTV, tenure and retention signals.',href:'studio-pulse.html',live:false},
 ];
 async function init(){
