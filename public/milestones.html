@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style id="gate">body{visibility:hidden}</style>
+<script>
+window.addEventListener('DOMContentLoaded',async()=>{
+  try{
+    const c=window.APP_CONFIG||{};
+    const sb=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY);
+    const {data:sess}=await sb.auth.getSession();
+    if(!sess.session){location.replace('index.html');return;}
+    const {data,error}=await sb.from('invoices').select('raw_text,created_at').eq('source','milestones-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle();
+    const gate=document.getElementById('gate');
+    if(error||!data||!data.raw_text){ if(gate)gate.remove(); document.body.innerHTML='<div style="max-width:680px;margin:60px auto;font-family:sans-serif;color:#475569;padding:0 20px"><a href=index.html style=color:#1a3a2a>\u2039 Hub</a><h2>Milestones data is being prepared</h2><p>The weekly Trainerize refresh hasn\u2019t completed yet \u2014 check back shortly.</p></div>'; return; }
+    window.__DATA__=JSON.parse(data.raw_text);
+    if(gate)gate.remove();
+    const s=document.createElement('script'); s.textContent=document.getElementById('dashcode').textContent; document.body.appendChild(s);
+    const bl=document.createElement('a'); bl.href='index.html'; bl.textContent='\u2039 Hub'; bl.style.cssText='position:fixed;top:10px;left:12px;z-index:9999;background:#1a3a2a;color:#fff;padding:6px 12px;border-radius:6px;font:600 12px -apple-system,sans-serif;text-decoration:none'; document.body.appendChild(bl);
+  }catch(e){const g=document.getElementById('gate');if(g)g.remove();document.body.insertAdjacentHTML('afterbegin','<p style="color:#b91c1c;font-family:sans-serif;padding:20px">Could not load Milestones: '+e.message+'</p>');}
+});
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Membership Milestones Dashboard</title>
+<style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{margin:0;background:#f4f6fb;color:#161a23;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.45}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px}
+h1{font-size:26px;margin:0 0 2px;font-weight:760;letter-spacing:-.02em}
+.sub{color:#6b7280;font-size:13px;margin-bottom:24px}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:#4b5563;margin:34px 0 14px;font-weight:700}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.kpi{background:#fff;border:1px solid #e6e8ef;border-radius:14px;padding:15px 15px 13px}
+.kpi .v{font-size:25px;font-weight:780;letter-spacing:-.02em}
+.kpi .l{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em;margin-top:3px}
+.kpi .x{font-size:11px;color:#9aa1ad;margin-top:5px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.three{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px}
+.card{background:#fff;border:1px solid #e6e8ef;border-radius:16px;padding:20px}
+.goal h3{margin:0;font-size:15px;font-weight:700}
+.goal .big{font-size:32px;font-weight:800;letter-spacing:-.02em;margin:10px 0 2px}
+.goal .tgt{font-size:13px;color:#6b7280;font-weight:500}
+.bar{height:12px;background:#eef0f6;border-radius:99px;overflow:hidden;margin:14px 0 8px}
+.bar>i{display:block;height:100%;border-radius:99px}
+.bar.green>i{background:linear-gradient(90deg,#16a34a,#22c55e)}
+.bar.blue>i{background:linear-gradient(90deg,#2563eb,#3b82f6)}
+.note{font-size:12px;color:#6b7280;margin-top:8px}
+.good{background:#f0fdf4;border-color:#bbf7d0}
+.flag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin-left:8px;vertical-align:middle}
+.flag.g{background:#bbf7d0;color:#15803d}
+.toggle{display:inline-flex;background:#eceef4;border-radius:10px;padding:3px;margin-left:12px;vertical-align:middle}
+.toggle button{border:0;background:transparent;padding:6px 13px;border-radius:8px;font-size:12.5px;font-weight:650;color:#5b6270;cursor:pointer}
+.toggle button.on{background:#fff;color:#161a23;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.clubgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.member{background:#fff;border:1px solid #e6e8ef;border-radius:13px;padding:13px 14px}
+.member .nm{font-weight:680;font-size:14.5px}
+.member .mt{font-size:12px;color:#6b7280;margin-top:3px}
+.mini{height:7px;background:#eef0f6;border-radius:99px;overflow:hidden;margin-top:9px}
+.mini>i{display:block;height:100%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:99px}
+.mini.g>i{background:linear-gradient(90deg,#16a34a,#22c55e)}
+.mmt{font-size:11px;color:#9aa1ad;margin-top:4px}
+.tb{display:flex;align-items:center;gap:10px;margin:7px 0}
+.tb .lab{width:120px;font-size:13px;color:#374151}
+.tb .track{flex:1;height:20px;background:#eef0f6;border-radius:6px;overflow:hidden}
+.tb .track>i{display:block;height:100%;background:linear-gradient(90deg,#6366f1,#818cf8);border-radius:6px}
+.tb .cnt{width:34px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #eef0f4;white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#6b7280;cursor:pointer;user-select:none;position:sticky;top:0;background:#fff}
+th.s:after{content:" \25B4";color:#c0c4cc}th.sd:after{content:" \25BE";color:#c0c4cc}
+tbody tr:hover{background:#fafbff}
+td.n{font-variant-numeric:tabular-nums;text-align:right}
+.search{width:100%;padding:10px 13px;border:1px solid #d7dae3;border-radius:10px;font-size:14px;margin-bottom:10px}
+.tablecard{max-height:560px;overflow:auto}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;margin-left:6px}
+.tag1000{background:#ede9fe;color:#6d28d9}.tag400{background:#dcfce7;color:#15803d}
+.muted{color:#9aa1ad}.tnames{flex-wrap:wrap;gap:5px;margin:2px 0 12px 130px}.chip{background:#eef2ff;color:#4338ca;font-size:11.5px;padding:2px 9px;border-radius:99px;display:inline-block}.tb:hover .lab{color:#4338ca}.tnames{margin-left:130px!important;gap:8px!important}.mcard{background:#f6f7fb;border:1px solid #e6e8ef;border-radius:10px;padding:7px 10px;min-width:150px;max-width:235px}.mn{font-weight:680;font-size:12.5px;display:block}.mpr{font-size:12px;color:#15803d;font-weight:700}.mpl{font-size:10.5px;color:#8a909c;display:block;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:215px}.seemore{margin-top:12px;width:100%;padding:9px;border:1px solid #d7dae3;background:#f8fafc;border-radius:10px;font-size:13px;font-weight:650;color:#374151;cursor:pointer}.seemore:hover{background:#eef2f7}.loss{color:#15803d;font-weight:600}.gain{color:#b45309}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.two,.three{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+  <h1>Membership Milestones Dashboard</h1>
+  <div class="sub" id="sub"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <h2>This month</h2>
+  <div class="two" id="goals"></div>
+
+  <h2>Weight lost over time</h2>
+  <div class="three" id="timeframes"></div>
+
+  <h2>Lifetime results</h2>
+  <div class="three">
+    <div class="card good">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <h3 style="margin:0">Total weight lost</h3>
+        <span class="toggle" id="attoggle"><button data-m="current" class="on">Current</button><button data-m="biz">Whole business</button></span>
+      </div>
+      <div id="atstat"></div>
+    </div>
+    <div class="card"><div id="cmstat"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">Biggest transformations</h3><div id="attop"></div></div>
+  </div>
+
+  <h2>Membership tenure</h2>
+  <div class="two">
+    <div class="card"><h3 style="margin:0 0 3px">How long members have been with you</h3><div class="note" style="margin:0 0 14px">Click any band to see who’s in it</div><div id="tenure"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">Longest-standing members</h3><div id="longest"></div></div>
+  </div>
+
+  <h2>Milestone clubs
+    <span class="toggle" id="metric">
+      <button data-m="lifetime" class="on">Gym workouts</button>
+      <button data-m="combined">Workouts + activities</button>
+    </span>
+  </h2>
+  <div class="two">
+    <div class="card"><h3 style="margin:0 0 12px">1000 Club <span class="muted" id="c1000n"></span></h3><div class="clubgrid" id="c1000"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">Approaching 1000 (800+)</h3><div id="n1000"></div></div>
+  </div>
+  <div class="two" style="margin-top:16px">
+    <div class="card"><h3 style="margin:0 0 12px">400 Club <span class="muted" id="c400n"></span></h3><div class="clubgrid" id="c400"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">Approaching 400 (300+)</h3><div id="n400"></div></div>
+  </div>
+
+  <h2>Strength gains
+    <span class="toggle" id="strtoggle">
+      <button data-p="ever" class="on">Ever</button>
+      <button data-p="month">This month</button>
+    </span>
+  </h2>
+  <div class="two">
+    <div class="card"><div id="strhead"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">Top PB setters</h3><div id="strsetters"></div></div>
+  </div>
+  <div class="two" style="margin-top:16px">
+    <div class="card"><h3 style="margin:0 0 4px">Heaviest lifts</h3><div class="note" style="margin:0 0 10px">Free weights only &mdash; machine/cable values excluded as unreliable</div><div id="strheavy"></div></div>
+    <div class="card"><h3 style="margin:0 0 4px">Biggest improvements</h3><div class="note" style="margin:0 0 10px">Largest free-weight increase vs previous best</div><div id="strimp"></div></div>
+  </div>
+
+  <h2>Habits &rarr; results &amp; retention</h2>
+  <div class="card">
+    <div class="note" id="habit-intro" style="font-size:13px"></div>
+    <div class="two" style="margin-top:14px">
+      <div><h3 style="margin:0 0 10px">By habit-engagement tier</h3><div id="habit-tiers"></div></div>
+      <div><h3 style="margin:0 0 10px">Habit engagement vs weight lost</h3><div id="habit-scatter"></div></div>
+    </div>
+    <div class="note" id="habit-caveat" style="margin-top:12px;font-size:12px"></div>
+  </div>
+
+  <h2>Full membership leaderboard</h2>
+  <div class="card">
+    <input class="search" id="q" placeholder="Search members..."/>
+    <div class="tablecard"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+<script type="text/plain" id="dashcode">
+const DATA=window.__DATA__;
+, S=DATA.summary, M=DATA.members, fmt=n=>n.toLocaleString();
+document.getElementById('sub').textContent=`Group 6611 · ${S.total_members} active members · generated ${S.generated}`;
+
+document.getElementById('kpis').innerHTML=[
+ ['Active members',fmt(S.total_members),''],
+ ['Workouts this month',fmt(S.workouts_month),`target ${S.workouts_month_target}`],
+ ['Activities this month',fmt(S.activities_month),`${S.act_active_this_month} members`],
+ ['Lifetime weight lost',S.at_lost_kg+' kg',`${S.at_losers} members`],
+ ['Workouts all-time',fmt(S.workouts_alltime),''],
+ ['Personal records',fmt(S.total_pr),`${fmt(S.total_mil)} milestones`],
+].map(k=>`<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div><div class="x">${k[2]}</div></div>`).join('');
+
+const wpct=Math.min(100,Math.round(S.workouts_month/S.workouts_month_target*100));
+document.getElementById('goals').innerHTML=`
+ <div class="card goal">
+   <h3>Workouts logged this month ${S.workouts_month>=S.workouts_month_target?'<span class="flag g">GOAL HIT</span>':''}</h3>
+   <div class="big">${fmt(S.workouts_month)} <span class="tgt">/ ${S.workouts_month_target}</span></div>
+   <div class="bar green"><i style="width:${wpct}%"></i></div>
+   <div class="note">${wpct}% of target · gym workouts only</div>
+ </div>
+ <div class="card goal">
+   <h3>Activities this month</h3>
+   <div class="big" style="color:#2563eb">${fmt(S.activities_month)}</div>
+   <div class="note">Walks, swims, bikes &amp; cardio · ${S.act_active_this_month} members · ${fmt(S.activities_30d)} in the last 30 days</div>
+ </div>`;
+
+document.getElementById('timeframes').innerHTML=`
+ <div class="card good"><h3 style="margin:0 0 4px">Lost this month</h3>
+   <div class="goal big" style="color:#15803d">${S.mtd_lost_kg} kg</div>
+   <div class="note" style="font-size:12.5px">Month-to-date, across <b>${S.mtd_losers}</b> members who lost (of ${S.mtd_measured} who weighed in this month).</div></div>
+ <div class="card good"><h3 style="margin:0 0 4px">Lost this year</h3>
+   <div class="goal big" style="color:#15803d">${S.ytd_lost_kg} kg</div>
+   <div class="note" style="font-size:12.5px">Year-to-date, across <b>${S.ytd_losers}</b> members who lost (of ${S.ytd_measured} who weighed in during 2026).</div></div>
+ <div class="card good"><h3 style="margin:0 0 4px">Lost all-time</h3>
+   <div class="goal big" style="color:#15803d">${S.at_lost_kg} kg</div>
+   <div class="note" style="font-size:12.5px">Full tenure, across <b>${S.at_losers}</b> members. Gainers excluded throughout.</div></div>`;
+let ATM='current';
+function renderAt(){
+ if(ATM==='biz'){
+  document.getElementById('atstat').innerHTML=`
+   <div class="goal big" style="color:#15803d">${fmt(S.biz_lost)} kg</div>
+   <div class="note" style="font-size:12.5px"><b>${(S.biz_lost/1000).toFixed(2)} tonnes</b> across <b>${S.biz_losers}</b> people who lost weight — everyone the gym has ever measured (${S.at_losers} current + ${S.deact_losers} former), <b>averaging ${S.biz_avg} kg each</b>. Bad/implausible entries removed. Bodyweight.</div>`;
+  renderAt();
+ } else {
+  document.getElementById('atstat').innerHTML=`
+   <div class="goal big" style="color:#15803d">${S.at_lost_kg} kg</div>
+   <div class="note" style="font-size:12.5px">Across <b>${S.at_losers}</b> current members who lost weight (gainers excluded). First weigh-in → latest, ${S.at_pair_members} with 2+ measurements, <b>averaging ${S.at_avg} kg each</b>. Bodyweight.</div>`;
+  document.getElementById('attop').innerHTML='<table><tbody>'+S.at_top.map((m,x)=>`<tr><td>${x+1}. ${m.name}</td><td class="n"><span class="loss">−${m.kg} kg</span></td></tr>`).join('')+'</tbody></table>';
+ }
+}
+document.querySelectorAll('#attoggle button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#attoggle button').forEach(x=>x.classList.remove('on'));b.classList.add('on');ATM=b.dataset.m;renderAt();});
+document.getElementById('cmstat').innerHTML=`
+ <h3 style="margin:0 0 4px">Total cm off the waist</h3>
+ <div class="goal big" style="color:#15803d">${S.waist_lost_cm} cm</div>
+ <div class="note" style="font-size:12.5px">Across <b>${S.waist_losers}</b> members. Only ${S.waist_pairs} members log comparable waist measurements, so this is a floor &mdash; more would show with consistent tracking.</div>`;
+document.getElementById('attop').innerHTML='<table><tbody>'+S.at_top.map((m,x)=>
+ `<tr><td>${x+1}. ${m.name}</td><td class="n"><span class="loss">&minus;${m.kg} kg</span></td></tr>`).join('')+'</tbody></table>';
+
+// tenure buckets
+const cleanPrice=p=>{if(!p)return'';const m=p.match(/\$([\d,.]+)/);const a=m?'$'+m[1]:p;if(/fortnight/i.test(p))return a+'/fn';if(/week/i.test(p))return a+'/wk';if(/month/i.test(p))return a+'/mo';if(/full cost|once|pif/i.test(p))return a+' once';return a;};
+const shortPlan=p=>p?p.replace(/^\s*\[\d{4}\]\s*/,'').trim():'';
+const maxb=Math.max(...S.tenure_buckets.map(b=>b.n));
+document.getElementById('tenure').innerHTML=S.tenure_buckets.map((b,i)=>
+ `<div class="tb" data-i="${i}" style="cursor:pointer"><div class="lab">${b.label}</div><div class="track"><i style="width:${Math.round(b.n/maxb*100)}%"></i></div><div class="cnt">${b.n}</div></div>`+
+ `<div class="tnames" id="tn${i}" style="display:none">${b.names.map(n=>`<div class="mcard" title="${(n.plan||'').replace(/"/g,'&quot;')}"><span class="mn">${n.name}</span>${n.price?`<span class="mpr">${cleanPrice(n.price)}</span>`:'<span class="mpr muted">no price</span>'}<span class="mpl">${shortPlan(n.plan)||'no plan matched'}</span></div>`).join('')||'<span class="muted">none</span>'}</div>`).join('');
+document.querySelectorAll('#tenure .tb').forEach(el=>el.onclick=()=>{const t=document.getElementById('tn'+el.dataset.i);t.style.display=t.style.display==='none'?'flex':'none';});
+const allByTenure=M.filter(m=>m.tenure_years!=null).sort((a,b)=>b.tenure_years-a.tenure_years);
+function renderLongest(n){
+ const rows=allByTenure.slice(0,n).map((m,x)=>
+   `<tr><td>${x+1}. ${m.name}</td><td class="n"><b>${m.tenure_years}</b> yrs <span class="muted">since ${(m.created||'').slice(0,7)}</span></td></tr>`).join('');
+ const expanded=n>=allByTenure.length;
+ document.getElementById('longest').innerHTML=
+   `<div class="tablecard" style="max-height:${n>12?'480px':'none'}"><table><tbody>${rows}</tbody></table></div>`+
+   `<button class="seemore" id="seemore">${expanded?'Show top 12':'See all '+allByTenure.length+' members \u2192'}</button>`;
+ document.getElementById('seemore').onclick=()=>renderLongest(expanded?12:allByTenure.length);
+}
+renderLongest(12);
+
+let METRIC='lifetime';
+const goalLabel=()=>METRIC==='lifetime'?'workouts':'workouts + activities';
+function card(m,goal){
+ const v=m[METRIC], pct=Math.min(100,Math.round(v/goal*100)), g=METRIC==='combined';
+ return `<div class="member"><div class="nm">${m.name}</div>
+  <div class="mt"><b>${fmt(v)}</b> ${goalLabel()}${g?` <span class="muted">(${fmt(m.lifetime)}w + ${fmt(m.activities)}a)</span>`:''}</div>
+  <div class="mini ${g?'g':''}"><i style="width:${pct}%"></i></div>
+  <div class="mmt">${pct}% · ${goal-v>0?fmt(goal-v)+' to go':'achieved'}</div></div>`;
+}
+function clubs(){
+ const v=m=>m[METRIC];
+ const c1000=M.filter(m=>v(m)>=1000).sort((a,b)=>v(b)-v(a));
+ const n1000=M.filter(m=>v(m)>=800&&v(m)<1000).sort((a,b)=>v(b)-v(a));
+ const c400=M.filter(m=>v(m)>=400&&v(m)<1000).sort((a,b)=>v(b)-v(a));
+ const n400=M.filter(m=>v(m)>=300&&v(m)<400).sort((a,b)=>v(b)-v(a));
+ document.getElementById('c1000').innerHTML=c1000.map(m=>card(m,1000)).join('')||'<div class="muted">None yet</div>';
+ document.getElementById('n1000').innerHTML=n1000.map(m=>card(m,1000)).join('')||'<div class="muted">None</div>';
+ document.getElementById('c400').innerHTML=c400.map(m=>card(m,400)).join('')||'<div class="muted">None yet</div>';
+ document.getElementById('n400').innerHTML=n400.map(m=>card(m,400)).join('')||'<div class="muted">None</div>';
+ document.getElementById('c1000n').textContent='· '+c1000.length+' members';
+ document.getElementById('c400n').textContent='· '+c400.length+' members';
+}
+document.querySelectorAll('#metric button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('#metric button').forEach(x=>x.classList.remove('on'));
+ b.classList.add('on');METRIC=b.dataset.m;clubs();});
+clubs();
+
+let STRP='ever';
+function renderStrength(){
+ const d=S.str[STRP], lab=STRP==='month'?'this month':'all-time';
+ document.getElementById('strhead').innerHTML=`
+  <h3 style="margin:0 0 4px">Personal bests ${STRP==='month'?'this month':'smashed'}</h3>
+  <div class="goal big" style="color:#6d28d9">${fmt(d.total)}</div>
+  <div class="note" style="font-size:12.5px">Weighted-lift PBs (${lab}) by type:</div>
+  <div style="margin-top:10px">`+(d.breakdown.map(b=>`<span style="background:#ede9fe;color:#6d28d9;margin:0 6px 6px 0;display:inline-block;padding:3px 10px;border-radius:99px;font-size:11.5px;font-weight:700">${b.lab}: ${b.n}</span>`).join('')||`<span class="muted">No records ${lab}</span>`)+`</div>`;
+ const tbl=(rows,empty)=>rows.length?'<table><tbody>'+rows+'</tbody></table>':`<div class="muted">${empty}</div>`;
+ document.getElementById('strsetters').innerHTML=tbl(d.setters.map((m,x)=>`<tr><td>${x+1}. ${m.name}</td><td class="n"><b>${m.prs}</b> PBs</td></tr>`).join(''),'No PBs '+lab);
+ document.getElementById('strheavy').innerHTML=tbl(d.heavy.map((r,x)=>`<tr><td>${x+1}. ${r.name} <span class="muted">${r.ex}</span></td><td class="n"><b>${r.val}</b> kg</td></tr>`).join(''),'No free-weight lifts '+lab);
+ document.getElementById('strimp').innerHTML=tbl(d.imp.map((r,x)=>`<tr><td>${x+1}. ${r.name} <span class="muted">${r.ex}</span></td><td class="n"><span class="loss">+${r.chg}kg</span> <span class="muted">&rarr; ${r.val}kg</span></td></tr>`).join(''),'No improvements '+lab);
+}
+document.querySelectorAll('#strtoggle button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#strtoggle button').forEach(x=>x.classList.remove('on'));b.classList.add('on');STRP=b.dataset.p;renderStrength();});
+renderStrength();
+
+const cols=[['name','Member','t'],['tenure_years','Years','n'],['lifetime','Workouts','n'],['month','Wk this mo','n'],
+ ['activities','Activities','n'],['act_month','Act this mo','n'],['combined','Combined','n'],
+ ['pr','PRs','n'],['alltime_loss_kg','Wt lost (kg)','n'],['last_workout','Last workout','t']];
+let sortKey='lifetime',sortDesc=true,q='';
+const thead=document.querySelector('#tbl thead'),tbody=document.querySelector('#tbl tbody');
+thead.innerHTML='<tr>'+cols.map(c=>`<th data-k="${c[0]}">${c[1]}</th>`).join('')+'</tr>';
+thead.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(k==sortKey)sortDesc=!sortDesc;else{sortKey=k;sortDesc=true;}render();});
+function badge(m){return m.lifetime>=1000?'<span class="tag tag1000">1000</span>':m.lifetime>=400?'<span class="tag tag400">400</span>':'';}
+function render(){
+ let rows=M.filter(m=>m.name&&m.name.toLowerCase().includes(q));
+ rows.sort((a,b)=>{let x=a[sortKey],y=b[sortKey];const txt=(sortKey=='name'||sortKey=='last_workout');
+  if(x==null)x=txt?'':-1e9;if(y==null)y=txt?'':-1e9;
+  if(typeof x==='string')return sortDesc?y.localeCompare(x):x.localeCompare(y);return sortDesc?y-x:x-y;});
+ tbody.innerHTML=rows.map(m=>{
+  let wl=m.alltime_loss_kg;
+  let wlc=wl==null?'<span class="muted">&mdash;</span>':(wl>0?`<span class="loss">&minus;${wl}</span>`:`<span class="gain">+${-wl}</span>`);
+  return `<tr>
+  <td>${m.name}${badge(m)}</td><td class="n">${m.tenure_years==null?'&mdash;':m.tenure_years}</td><td class="n">${fmt(m.lifetime)}</td><td class="n">${m.month}</td>
+  <td class="n">${fmt(m.activities)}</td><td class="n">${m.act_month}</td><td class="n">${fmt(m.combined)}</td>
+  <td class="n">${m.pr}</td><td class="n">${wlc}</td><td class="${m.last_workout?'':'muted'}">${m.last_workout||'never'}</td></tr>`;}).join('');
+ thead.querySelectorAll('th').forEach(th=>{th.className=th.dataset.k==sortKey?(sortDesc?'sd':'s'):'';});
+}
+document.getElementById('q').oninput=e=>{q=e.target.value.toLowerCase();render();};
+render();
+
+(function(){
+ const H=S.habit; if(!H) return;
+ document.getElementById('habit-intro').innerHTML=`<b>What this shows:</b> members tick off daily habits in Trainerize (e.g. &ldquo;Read Daily Goals&rdquo;, &ldquo;8k steps&rdquo;, &ldquo;Track cals&rdquo;). This is how habit engagement lines up with weight lost and with staying a member. ${H.uses_pct}% of all members use habits at all.`;
+ document.getElementById('habit-tiers').innerHTML='<table><thead><tr><th>Habit engagement</th><th class="n">Members</th><th class="n">Still active</th><th class="n">Avg loss</th></tr></thead><tbody>'+H.tiers.map(t=>`<tr><td>${t.label}</td><td class="n">${t.n}</td><td class="n">${t.active_pct}%</td><td class="n">${t.avg_loss!=null?t.avg_loss+' kg':'—'}</td></tr>`).join('')+'</tbody></table>'+`<div class="note" style="margin-top:8px">Correlation (engagement vs weight lost): <b>r = ${H.r_loss}</b> across ${H.n_loss} members — a real, modest positive link.</div>`;
+ const W=560,HH=300,pl=46,pb=34,ptp=10,pr=12;
+ const ys=H.scatter.map(p=>p.y); const xmax=40, ymax=Math.min(52,Math.max(10,...ys)+2);
+ const X=v=>pl+(Math.min(v,xmax)/xmax)*(W-pl-pr), Y=v=>HH-pb-(Math.min(v,ymax)/ymax)*(HH-pb-ptp);
+ let s=`<svg viewBox="0 0 ${W} ${HH}" style="width:100%;height:auto">`;
+ for(let i=0;i<=ymax;i+=10){s+=`<line x1="${pl}" y1="${Y(i)}" x2="${W-pr}" y2="${Y(i)}" stroke="#eef0f4"/><text x="${pl-6}" y="${Y(i)+3}" font-size="9" fill="#9aa1ad" text-anchor="end">${i}kg</text>`;}
+ for(let i=0;i<=xmax;i+=10){s+=`<text x="${X(i)}" y="${HH-pb+14}" font-size="9" fill="#9aa1ad" text-anchor="middle">${i}</text>`;}
+ s+=`<line x1="${pl}" y1="${HH-pb}" x2="${W-pr}" y2="${HH-pb}" stroke="#cbd0db"/><line x1="${pl}" y1="${ptp}" x2="${pl}" y2="${HH-pb}" stroke="#cbd0db"/>`;
+ H.scatter.forEach(p=>{s+=`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="3" fill="${p.a?'#16a34a':'#c0c4cc'}" opacity="0.65"/>`;});
+ s+=`<text x="${pl+(W-pl-pr)/2}" y="${HH-2}" font-size="10" fill="#6b7280" text-anchor="middle">Habit engagement (streak milestones reached)</text></svg>`;
+ document.getElementById('habit-scatter').innerHTML=s+'<div class="note" style="font-size:11px;margin-top:2px"><span style="color:#16a34a">\u25CF</span> still active &nbsp; <span style="color:#c0c4cc">\u25CF</span> churned</div>';
+ document.getElementById('habit-caveat').innerHTML=`<b>Read with care:</b> this is correlation, not proof of cause — members who stay longer naturally rack up more habit streaks, so the link runs partly both ways. But the pattern is consistent: more habit-ticking goes with more weight lost (avg ${H.tiers[0].avg_loss}kg with no habits &rarr; ${H.tiers[H.tiers.length-1].avg_loss}kg for high engagement) and far better retention (${H.tiers[0].active_pct}% vs ${H.tiers[H.tiers.length-1].active_pct}% still active).`;
+})();
+</script></body></html>

@@ -7,6 +7,7 @@ export default async () => {
   const base = process.env.URL || process.env.DEPLOY_PRIME_URL;
   try {
     await fetch(`${base}/.netlify/functions/sync-gymmaster-background`, { method: 'POST' });
+    await fetch(`${base}/.netlify/functions/sync-milestones-background`, { method: 'POST' });
   } catch (e) {
     console.error('cron trigger failed', e);
   }
