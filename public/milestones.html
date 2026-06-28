@@ -15,7 +15,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
     if(error||!data||!data.raw_text){ if(gate)gate.remove(); document.body.innerHTML='<div style="max-width:680px;margin:60px auto;font-family:sans-serif;color:#475569;padding:0 20px"><a href=index.html style=color:#1a3a2a>\u2039 Hub</a><h2>Milestones data is being prepared</h2><p>The weekly Trainerize refresh hasn\u2019t completed yet \u2014 check back shortly.</p></div>'; return; }
     window.__DATA__=JSON.parse(data.raw_text);
     if(gate)gate.remove();
-    const s=document.createElement('script'); s.textContent=document.getElementById('dashcode').textContent; document.body.appendChild(s);
+    if(window.__renderMS){try{window.__renderMS();}catch(err){document.body.insertAdjacentHTML('afterbegin','<p style="color:#b91c1c;font-family:sans-serif;padding:16px">Render error: '+err.message+'</p>');}}
     const bl=document.createElement('a'); bl.href='index.html'; bl.textContent='\u2039 Hub'; bl.style.cssText='position:fixed;top:10px;left:12px;z-index:9999;background:#1a3a2a;color:#fff;padding:6px 12px;border-radius:6px;font:600 12px -apple-system,sans-serif;text-decoration:none'; document.body.appendChild(bl);
   }catch(e){const g=document.getElementById('gate');if(g)g.remove();document.body.insertAdjacentHTML('afterbegin','<p style="color:#b91c1c;font-family:sans-serif;padding:20px">Could not load Milestones: '+e.message+'</p>');}
 });
@@ -152,7 +152,9 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
     <div class="tablecard"><table id="tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 </div>
-<script type="text/plain" id="dashcode">
+<script>
+window.__renderMS=function(){
+
 const DATA=window.__DATA__;
 const S=DATA.summary, M=DATA.members, fmt=n=>n.toLocaleString();
 document.getElementById('sub').textContent=`Group 6611 · ${S.total_members} active members · generated ${S.generated}`;
@@ -316,4 +318,6 @@ render();
  document.getElementById('habit-scatter').innerHTML=s+'<div class="note" style="font-size:11px;margin-top:2px"><span style="color:#16a34a">\u25CF</span> still active &nbsp; <span style="color:#c0c4cc">\u25CF</span> churned</div>';
  document.getElementById('habit-caveat').innerHTML=`<b>Read with care:</b> this is correlation, not proof of cause — members who stay longer naturally rack up more habit streaks, so the link runs partly both ways. But the pattern is consistent: more habit-ticking goes with more weight lost (avg ${H.tiers[0].avg_loss}kg with no habits &rarr; ${H.tiers[H.tiers.length-1].avg_loss}kg for high engagement) and far better retention (${H.tiers[0].active_pct}% vs ${H.tiers[H.tiers.length-1].active_pct}% still active).`;
 })();
+
+};
 </script></body></html>
