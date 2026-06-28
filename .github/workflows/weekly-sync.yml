@@ -1,0 +1,27 @@
+name: Weekly data sync
+on:
+  schedule:
+    - cron: '0 18 * * 0'   # Sun 18:00 UTC ≈ Mon 6am NZT
+  workflow_dispatch: {}      # manual "Run workflow" button
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run syncs
+        run: node scripts/run-sync.mjs
+        env:
+          # --- non-secret config, safe to hard-code ---
+          GYMMASTER_BASE_URL:   'https://growingyounger.gymmasteronline.com'
+          GYMMASTER_COMPANY_ID: '2'
+          SUPABASE_URL:         'https://eqevyohstkwqslloqsni.supabase.co'
+          TRAINERIZE_GROUP_ID:  '6611'
+          SYNC_LOOKBACK_DAYS:   '180'
+          # --- the 3 real secrets (add these in repo Settings) ---
+          GYMMASTER_API_KEY:         ${{ secrets.GYMMASTER_API_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TRAINERIZE_API_TOKEN:      ${{ secrets.TRAINERIZE_API_TOKEN }}
