@@ -112,7 +112,7 @@ function render(){
 }
 function setTab(t){if(STATE.tab==='check'){const a=$('#trn'),b=$('#from'),c=$('#to');if(a&&b&&c)STATE.check={trainer:a.value,from:b.value,to:c.value};}STATE.tab=t;render();}
 async function loadTrainers(){if(!STATE.trainers.length){const{data}=await sb.from('trainers').select('*').eq('active',true).order('is_contractor',{ascending:false}).order('name');STATE.trainers=data||[];}return STATE.trainers;}
-async function loadClientsMap(){if(!STATE.clientsMap){const{data}=await sb.from('clients').select('full_name,membership,lead_source');const m={};for(const c of (data||[])){if(c.full_name)m[c.full_name.toLowerCase()]={membership:c.membership||'',lead:c.lead_source||''};}STATE.clientsMap=m;}return STATE.clientsMap;}
+async function loadClientsMap(){if(!STATE.clientsMap){const{data}=await sb.from('clients').select('full_name,membership,lead_source,signup_cash');const m={};for(const c of (data||[])){if(c.full_name)m[c.full_name.toLowerCase()]={membership:c.membership||'',lead:c.lead_source||'',signup:c.signup_cash||''};}STATE.clientsMap=m;}return STATE.clientsMap;}
 function priceFromMembership(p){if(!p)return null;const m=String(p).match(/\$([\d,]+(?:\.\d+)?)/);return m?m[1].replace(/,/g,''):null;}
 
 // ---------------- INVOICE CHECK ----------------
@@ -215,7 +215,7 @@ async function genExpected(){
     ...squads.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Squad',group:'sqd',mins:60,sig:sigOf(s)})),
     ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s)})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
-  const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};return{date:s.session_date,person:nm||'Discovery call',lead:ci.lead||'',membership:ci.membership||'',cash:priceFromMembership(ci.membership)||'',sig:sigOf(s)};}).sort((a,b)=>a.date.localeCompare(b.date));
+  const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};return{date:s.session_date,person:nm||'Discovery call',lead:ci.lead||'',membership:ci.membership||'',cash:ci.signup||'',sig:sigOf(s)};}).sort((a,b)=>a.date.localeCompare(b.date));
   STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
