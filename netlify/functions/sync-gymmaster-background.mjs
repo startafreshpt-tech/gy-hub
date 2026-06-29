@@ -177,7 +177,8 @@ export default async () => {
         try {
           const upResp = await gmGet(`/portal/api/v2/member/bookings?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
           if (!dbgRaw) dbgRaw = { keys: Object.keys(upResp || {}), snippet: JSON.stringify(upResp).slice(0, 600) };
-          const cb = upResp.classbookings || [], sv = upResp.servicebookings || [];
+          const R = (upResp && upResp.result) || upResp || {};
+          const cb = R.classbookings || [], sv = R.servicebookings || [];
           dbgClass += cb.length; dbgService += sv.length;
           if (!dbgSample && (cb.length || sv.length)) dbgSample = cb[0] || sv[0];
           upcoming = [...cb, ...sv];   // PT/coaching are class-type bookings (trainer in staffname)

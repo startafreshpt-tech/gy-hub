@@ -73,9 +73,10 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   // Trainerize's authoritative lifetime totals — the calendar walk above
   // undercounts badly for long-tenure members (e.g. 1000-club). Use these.
   const summ=await api('/user/getClientSummary',{userID:uid,unitWeight:'kg'});
-  const sR=summ&&(summ.Response!==undefined?summ.Response:summ);
-  const wTot=sR&&Number.isFinite(sR.workoutsTotal)?sR.workoutsTotal:null;
-  const cTot=sR&&Number.isFinite(sR.cardioTotal)?sR.cardioTotal:null;
+  const sR=(summ&&summ.Response)||(summ&&summ.result)||summ||{};
+  const wTot=Number.isFinite(sR.workoutsTotal)?sR.workoutsTotal:null;
+  const cTot=Number.isFinite(sR.cardioTotal)?sR.cardioTotal:null;
+  if(!globalThis.__dbgSumm){globalThis.__dbgSumm={name:m.name,keys:Object.keys(sR||{}).slice(0,15),workoutsTotal:sR.workoutsTotal,wTot,snippet:JSON.stringify(summ).slice(0,300)};}
   const lifeGym=wTot!=null?Math.max(wTot,wDates.length):wDates.length;
   const lifeAct=cTot!=null?Math.max(cTot,cDates.length):cDates.length;
   return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:lifeGym,activities:lifeAct,combined:lifeGym+lifeAct,
@@ -187,6 +188,7 @@ async function sbWrite(dataStr){
 export default async()=>{
   if(!GROUP_ID||!TOKEN||!SB_URL||!SB_KEY) return new Response(JSON.stringify({ok:false,error:'missing env'}),{status:500});
   try{ const DATA=await buildDATA(); await sbWrite(JSON.stringify(DATA));
+    try{ const today2=new Date().toISOString().slice(0,10); const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'}; await fetch(`${SB_URL}/rest/v1/invoices?source=eq.debug-milestones`,{method:'DELETE',headers:{...H,Prefer:'return=minimal'}}); await fetch(`${SB_URL}/rest/v1/invoices`,{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({trainer_name:'__debug-milestones__',period_start:today2,period_end:today2,source:'debug-milestones',status:'data',raw_text:JSON.stringify(globalThis.__dbgSumm||{none:true}),created_by:'debug'})}); }catch(e){}
     return new Response(JSON.stringify({ok:true,members:DATA.members.length,generated:DATA.summary.generated}),{headers:{'content-type':'application/json'}});
   }catch(e){ return new Response(JSON.stringify({ok:false,error:String(e)}),{status:500}); }
 };
