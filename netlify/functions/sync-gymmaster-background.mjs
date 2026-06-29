@@ -91,6 +91,36 @@ async function sbSelect(table, query = '') {
   return Array.isArray(j) ? j : [];
 }
 
+// ---- Holds capture (defensive: GymMaster suspension shapes vary) ----
+function normHoldDate(v){
+  if(!v) return null; const s=String(v).slice(0,10);
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  return null;
+}
+function collectHolds(out, m, ms){
+  const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k];}return null;};
+  const name=`${m.surname||''}, ${m.firstname||''}`.trim();
+  const last=String(m.surname||'').toLowerCase(); const first=String(m.firstname||'').toLowerCase();
+  const consider=(start,end,reason)=>{const s=normHoldDate(start),e=normHoldDate(end);if(s&&e)out.push({member_name:name,last,first,hold_start:s,hold_end:e,reason:String(reason||'')});};
+  for(const x of (ms||[])){
+    consider(pick(x,['suspend_start','suspendfrom','suspend_from','hold_start','holdstart','freeze_start','suspendstart','datehold','date_hold']),
+             pick(x,['suspend_end','suspendto','suspend_to','hold_end','holdend','freeze_end','suspendend','holduntil','hold_until']),
+             pick(x,['suspend_reason','hold_reason','reason','holdreason']));
+    const arr=x.suspensions||x.holds||x.freezes;
+    if(Array.isArray(arr))for(const h of arr)
+      consider(pick(h,['startdate','start','from','suspend_start','hold_start','datehold']),
+               pick(h,['enddate','end','to','suspend_end','hold_end','holduntil']),
+               pick(h,['reason','note','holdreason']));
+  }
+}
+async function sbWriteBlob(source, dataStr){
+  const today=new Date().toISOString().slice(0,10);
+  await fetch(`${SB}/invoices?source=eq.${source}`,{method:'DELETE',headers:sbHeaders({Prefer:'return=minimal'})});
+  await fetch(`${SB}/invoices`,{method:'POST',headers:sbHeaders({Prefer:'return=minimal'}),body:JSON.stringify({trainer_name:'__'+source+'__',period_start:today,period_end:today,source,status:'data',raw_text:dataStr,created_by:'weekly-sync'})});
+}
+
 function staffToTrainer(c, byStaffId, names) {
   if (c.staffid && byStaffId[c.staffid]) return byStaffId[c.staffid];
   const blob = ((c.staffname || '') + ' ' + (c.location || '')).toLowerCase();
@@ -110,6 +140,7 @@ export default async () => {
   (trainers || []).forEach(t => { if (t.gm_staffid) byStaffId[t.gm_staffid] = t.name; });
 
   let scanned = 0, upserted = 0;
+  const holdsOut = [];
   try {
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(SYNC_LOOKBACK_DAYS));
 
@@ -126,6 +157,7 @@ export default async () => {
         const past = pastResp.result || [];
         const msResp = await gmGet(`/portal/api/v1/member/memberships?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
         const ms = msResp.result || [];
+        collectHolds(holdsOut, m, ms);
         const active = ms.find(x => !x.enddate) || ms[0];
         const cz = parseCoaching(active && active.name);
         const rows = [];
@@ -181,6 +213,7 @@ export default async () => {
       } catch (e) { /* skip week */ }
     }
 
+    await sbWriteBlob('holds-snapshot', JSON.stringify({ updated: new Date().toISOString(), holds: holdsOut }));
     await sbPatch('sync_log', `id=eq.${logId}`, {
       finished_at: new Date().toISOString(), members_scanned: scanned,
       sessions_upserted: upserted, status: 'ok',

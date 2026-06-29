@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GY Client Follow-Up</title>
+<style>
+:root{color-scheme:light}*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f1;color:#1e293b;min-height:100vh;visibility:hidden}
+a{color:#1a3a2a}
+.header{background:#1a3a2a;color:#fff;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.header h1{font-size:17px;font-weight:700;letter-spacing:-.3px}
+.header a{color:#cde7d6;text-decoration:none;font-size:13px}
+.week-badge{background:rgba(255,255,255,.15);padding:5px 12px;border-radius:20px;font-size:12px}
+.stats-bar{display:flex;gap:8px;padding:12px 16px;background:#fff;border-bottom:1px solid #e2e8f0;flex-wrap:wrap}
+.stat-chip{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600}
+.filters{display:flex;gap:6px;padding:10px 16px;background:#fff;border-bottom:1px solid #e2e8f0;overflow-x:auto}
+.filter-btn{padding:5px 12px;border-radius:20px;font-size:12px;border:1px solid #e2e8f0;background:#fff;cursor:pointer;white-space:nowrap}
+.filter-btn.active{background:#1a3a2a;color:#fff;border-color:#1a3a2a}
+.client-list{padding:12px 16px;display:flex;flex-direction:column;gap:6px;max-width:1100px;margin:0 auto}
+.client-card{background:#fff;border-radius:8px;border:1px solid #e2e8f0;padding:10px 14px;display:flex;align-items:flex-start;gap:10px;transition:box-shadow .15s}
+.client-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.client-card.priority{border-left:3px solid #ef4444}
+.client-card.returning{border-left:3px solid #a855f7}
+.client-info{flex:1;min-width:0}
+.client-name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.badge{font-size:10px;padding:2px 7px;border-radius:10px;font-weight:600}
+.badge-returning{background:#f3e8ff;color:#7c3aed}.badge-hold{background:#fef3c7;color:#92400e}
+.client-meta{font-size:11px;color:#64748b;margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.hold-info{font-size:11px;color:#92400e;margin-top:3px;background:#fef9c3;padding:3px 8px;border-radius:4px;display:inline-block}
+.notes-wrap{margin-top:6px}
+.notes-input{width:100%;max-width:520px;padding:5px 9px;border:1px solid #e2e8f0;border-radius:5px;font-size:12px;font-family:inherit;color:#334155}
+.notes-input:focus{outline:none;border-color:#1a3a2a}
+.status-col{flex-shrink:0}
+.status-selector{position:relative}
+.status-btn{padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;border:none;cursor:pointer;white-space:normal;display:flex;align-items:center;gap:4px;max-width:210px;text-align:left;line-height:1.2}
+.status-btn::after{content:'\25BE';font-size:9px;opacity:.7;margin-left:2px}
+.status-dropdown{position:absolute;top:100%;right:0;margin-top:4px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.14);z-index:20;display:none;min-width:230px;overflow:hidden}
+.status-dropdown.open{display:block}
+.status-option{padding:8px 12px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px}
+.status-option:hover{background:#f1f5f9}
+.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.save-bar{position:sticky;bottom:0;background:#fff;border-top:1px solid #e2e8f0;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.save-btn,.refresh-btn{padding:8px 14px;border-radius:7px;font-size:13px;font-weight:600;border:none;cursor:pointer}
+.save-btn{background:#1a3a2a;color:#fff}.refresh-btn{background:#e2e8f0;color:#334155}
+.progress-text{font-size:12px;color:#64748b}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;gap:14px;color:#64748b}
+.spinner{width:34px;height:34px;border:3px solid #e2e8f0;border-top-color:#1a3a2a;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.empty-state{padding:40px;text-align:center;color:#94a3b8}
+.muted{color:#94a3b8}
+</style>
+</head>
+<body>
+<div id="app"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+let ME='';
+
+const STATUSES=[
+  {id:'seen',label:'Seen during the period',color:'#22c55e',text:'#fff'},
+  {id:'not_due_attending',label:'Not due (attending regularly)',color:'#86efac',text:'#166534'},
+  {id:'not_due_not_attending',label:'Not due (not attending)',color:'#f97316',text:'#fff'},
+  {id:'phoned',label:'Phoned (add comment)',color:'#eab308',text:'#713f12'},
+  {id:'due_booked',label:'Due (booked for future date)',color:'#a855f7',text:'#fff'},
+  {id:'due_no_contact',label:'Due (could not make contact)',color:'#ef4444',text:'#fff'},
+  {id:'other',label:'Other (add comment)',color:'#9ca3af',text:'#fff'},
+  {id:'paused',label:'Paused',color:'#d97706',text:'#fff'},
+];
+const PRIORITY_IDS=['due_no_contact','due_booked','not_due_not_attending'];
+const NOTES_NEEDED=['phoned','due_no_contact','other'];
+const SKIP=/dummy|test|demo/i;
+
+const TODAY=new Date();TODAY.setHours(0,0,0,0);
+function mondayOf(d){const x=new Date(d);x.setDate(x.getDate()-((x.getDay()+6)%7));x.setHours(0,0,0,0);return x;}
+function getWeekKey(){return mondayOf(TODAY).toISOString().slice(0,10);}
+function lastWeekKey(){const m=mondayOf(TODAY);m.setDate(m.getDate()-7);return m.toISOString().slice(0,10);}
+function getWeekDisplay(){const mon=mondayOf(TODAY);const sun=new Date(mon);sun.setDate(mon.getDate()+6);const f=d=>d.toLocaleDateString('en-NZ',{day:'numeric',month:'short'});return `${f(mon)} – ${f(sun)} ${mon.getFullYear()}`;}
+function parseISO(s){if(!s)return null;const d=new Date(s);d.setHours(0,0,0,0);return isNaN(d)?null:d;}
+function getStatus(id){return STATUSES.find(s=>s.id===id)||STATUSES[1];}
+function shortenPlan(p){if(!p)return'';return p.replace(/^\s*\[\d{4}\]\s*/,'').replace(/\s*-\s*Billed?\s*Weekly\s*$/i,'').replace(/\s+/g,' ').trim();}
+function lastKeyOf(surname){return String(surname||'').toLowerCase().replace(/['\-\s]/g,'');}
+
+let allClients=[], currentFilter='all', openDropdownIdx=null, bookingsMap={}, weekKey=getWeekKey();
+
+function findHolds(c,holds){const last=(c.surname||'').toLowerCase();const first=(c.firstName||'').toLowerCase();
+  return holds.filter(h=>{if((h.last||'')!==last)return false;if(h.first&&first&&!first.includes(h.first)&&!h.first.includes(first))return false;return true;});}
+function activeHold(hs){return hs.find(h=>{const s=parseISO(h.hold_start),e=parseISO(h.hold_end);return s&&e&&s<=TODAY&&e>=TODAY;})||null;}
+function recentHold(hs){const ago=new Date(TODAY);ago.setDate(TODAY.getDate()-14);return hs.find(h=>{const e=parseISO(h.hold_end);return e&&e>=ago&&e<TODAY;})||null;}
+
+function buildClients(clients,holds,thisWk,lastWk){
+  const out=clients.map(sc=>{
+    const email=(sc.email||'').toLowerCase();
+    const saved=thisWk[email];
+    const prev=lastWk[email];
+    const hs=findHolds(sc,holds);
+    const ah=activeHold(hs),rh=recentHold(hs);
+    let status,notes='',holdInfo=null,tag=null;
+    if(saved){status=saved.status;notes=saved.notes||'';}
+    else if(ah){status='paused';holdInfo=`On hold until ${parseISO(ah.hold_end).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}${ah.reason?' — '+ah.reason:''}`;tag='hold';}
+    else if(rh){status=(prev&&prev.status!=='paused')?prev.status:'not_due_attending';holdInfo=`Returned ${parseISO(rh.hold_end).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})} — check in`;tag='returning';}
+    else{status=prev?prev.status:'not_due_attending';}
+    const bk=bookingsMap[lastKeyOf(sc.surname)];
+    return{email,name:sc.name,firstName:sc.firstName,surname:sc.surname,plan:shortenPlan(sc.membership),
+      status,notes,holdInfo,tag,prevStatus:prev?prev.status:null,booking:bk?bk.label:null};
+  });
+  return out.sort((a,b)=>{
+    const wa=PRIORITY_IDS.indexOf(a.status),wb=PRIORITY_IDS.indexOf(b.status);
+    const pa=wa===-1?99:wa,pb=wb===-1?99:wb;if(pa!==pb)return pa-pb;
+    const ra=a.tag==='returning'?0:1,rb=b.tag==='returning'?0:1;if(ra!==rb)return ra-rb;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function filtered(){
+  if(currentFilter==='attention')return allClients.filter(c=>PRIORITY_IDS.includes(c.status));
+  if(currentFilter==='paused')return allClients.filter(c=>c.status==='paused');
+  if(currentFilter==='returning')return allClients.filter(c=>c.tag==='returning');
+  if(currentFilter==='notbooked')return allClients.filter(c=>!c.booking&&c.status!=='paused');
+  return allClients;
+}
+function renderStats(){
+  const att=allClients.filter(c=>PRIORITY_IDS.includes(c.status)).length;
+  const paused=allClients.filter(c=>c.status==='paused').length;
+  const seen=allClients.filter(c=>c.status==='seen').length;
+  const ret=allClients.filter(c=>c.tag==='returning').length;
+  return `<div class="stats-bar">
+    <span class="stat-chip" style="background:#f1f5f9;color:#475569">👥 ${allClients.length} clients</span>
+    ${att?`<span class="stat-chip" style="background:#fee2e2;color:#dc2626;cursor:pointer" onclick="setFilter('attention')">🔴 ${att} need attention</span>`:''}
+    ${paused?`<span class="stat-chip" style="background:#fef3c7;color:#92400e;cursor:pointer" onclick="setFilter('paused')">⏸ ${paused} paused</span>`:''}
+    ${ret?`<span class="stat-chip" style="background:#f3e8ff;color:#7c3aed;cursor:pointer" onclick="setFilter('returning')">↩ ${ret} recently returned</span>`:''}
+    ${seen?`<span class="stat-chip" style="background:#dcfce7;color:#166534">✅ ${seen} seen</span>`:''}
+  </div>`;
+}
+function renderFilters(){
+  const tabs=[{id:'all',label:'All'},{id:'attention',label:'🔴 Needs attention'},{id:'paused',label:'⏸ Paused'},{id:'returning',label:'↩ Returning'},{id:'notbooked',label:'⚠️ Not booked'}];
+  return `<div class="filters">${tabs.map(t=>`<button class="filter-btn${currentFilter===t.id?' active':''}" onclick="setFilter('${t.id}')">${t.label}</button>`).join('')}</div>`;
+}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function renderCard(c,idx){
+  const st=getStatus(c.status);
+  const isPri=PRIORITY_IDS.includes(c.status);
+  const cardClass=isPri?'priority':(c.tag==='returning'?'returning':'');
+  const needsNotes=NOTES_NEEDED.includes(c.status);
+  const prevLabel=c.prevStatus&&!['not_due_attending','seen'].includes(c.prevStatus)?getStatus(c.prevStatus).label:null;
+  return `<div class="client-card ${cardClass}" id="card-${idx}">
+    <div class="client-info">
+      <div class="client-name">${esc(c.name)}
+        ${c.tag==='returning'?'<span class="badge badge-returning">↩ Returning</span>':''}
+        ${c.tag==='hold'?'<span class="badge badge-hold">On Hold</span>':''}
+      </div>
+      <div class="client-meta">
+        ${c.plan?`<span>📋 ${esc(c.plan)}</span>`:''}
+        ${c.booking?`<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-weight:600">✅ Booked — ${esc(c.booking)}</span>`:`<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-weight:600">⚠️ Not booked</span>`}
+        ${prevLabel?`<span class="muted">Last week: ${esc(prevLabel)}</span>`:''}
+      </div>
+      ${c.holdInfo?`<div class="hold-info">ℹ️ ${esc(c.holdInfo)}</div>`:''}
+      <div class="notes-wrap"><input type="text" class="notes-input" id="notes-${idx}" placeholder="Add note…" value="${esc(c.notes)}" style="display:${needsNotes||c.notes?'block':'none'}" oninput="updateNotes(${idx},this.value)"></div>
+    </div>
+    <div class="status-col"><div class="status-selector">
+      <button class="status-btn" id="sbtn-${idx}" style="background:${st.color};color:${st.text}" onclick="toggleDropdown(${idx},event)">${st.label}</button>
+      <div class="status-dropdown" id="dd-${idx}">${STATUSES.map(s=>`<div class="status-option" onclick="setStatus(${idx},'${s.id}')"><span class="status-dot" style="background:${s.color}"></span>${s.label}</div>`).join('')}</div>
+    </div></div>
+  </div>`;
+}
+function renderSaveBar(){
+  const done=allClients.filter(c=>c.status==='seen'||c.status==='phoned'||c.status==='due_booked').length;
+  return `<div class="save-bar">
+    <button class="refresh-btn" onclick="boot()">🔄 Refresh</button>
+    <button class="save-btn" onclick="copySummary()">📋 Copy weekly summary</button>
+    <span class="progress-text">✓ Saved automatically &amp; shared with your team · ${done} actioned this week</span>
+  </div>`;
+}
+function render(){
+  const list=filtered();
+  document.getElementById('app').innerHTML=
+    `<div class="header"><h1>📞 Client Follow-Up</h1><div><span class="week-badge">${getWeekDisplay()}</span> &nbsp; <a href="index.html">‹ Hub</a> &nbsp; <a href="#" onclick="signOut();return false">Sign out</a></div></div>`+
+    renderStats()+renderFilters()+
+    `<div class="client-list">${list.length?list.map(c=>renderCard(c,allClients.indexOf(c))).join(''):'<div class="empty-state">No clients in this filter.</div>'}</div>`+
+    renderSaveBar();
+}
+
+function setFilter(f){currentFilter=f;render();}
+function toggleDropdown(idx,e){e.stopPropagation();
+  if(openDropdownIdx!==null&&openDropdownIdx!==idx)document.getElementById(`dd-${openDropdownIdx}`)?.classList.remove('open');
+  const dd=document.getElementById(`dd-${idx}`);dd.classList.toggle('open');openDropdownIdx=dd.classList.contains('open')?idx:null;}
+document.addEventListener('click',()=>{if(openDropdownIdx!==null){document.getElementById(`dd-${openDropdownIdx}`)?.classList.remove('open');openDropdownIdx=null;}});
+async function setStatus(idx,id){const c=allClients[idx];c.status=id;openDropdownIdx=null;
+  const ni=document.getElementById(`notes-${idx}`);if(ni)ni.style.display=(NOTES_NEEDED.includes(id)||c.notes)?'block':'none';
+  await saveOne(c);render();}
+let noteTimer={};
+function updateNotes(idx,val){const c=allClients[idx];c.notes=val;clearTimeout(noteTimer[idx]);noteTimer[idx]=setTimeout(()=>saveOne(c),600);}
+async function saveOne(c){
+  try{await sb.from('followup_status').upsert({week_key:weekKey,client_email:c.email,status:c.status,notes:c.notes||'',updated_by:ME,updated_at:new Date().toISOString()},{onConflict:'week_key,client_email'});}
+  catch(e){console.warn('save failed',e);}
+}
+function copySummary(){
+  const wk=getWeekDisplay();
+  const lines=allClients.map(c=>`${c.name} | ${c.plan||'—'} | ${getStatus(c.status).label}${c.notes?' ('+c.notes+')':''}`);
+  const flagged=allClients.filter(c=>PRIORITY_IDS.includes(c.status));
+  const paused=allClients.filter(c=>c.status==='paused');
+  const txt=[`Week: ${wk}`,`Total: ${allClients.length}`,
+    flagged.length?`Needs attention (${flagged.length}): ${flagged.map(c=>c.name).join(', ')}`:'',
+    paused.length?`Paused (${paused.length}): ${paused.map(c=>c.name).join(', ')}`:'','','FULL STATUS LIST:',...lines].filter(l=>l!=='').join('\n');
+  navigator.clipboard.writeText(txt).then(()=>alert('Weekly summary copied to clipboard.'),()=>alert('Could not copy.'));
+}
+async function signOut(){await sb.auth.signOut();location.replace('index.html');}
+
+async function boot(){
+  document.body.style.visibility='visible';
+  document.getElementById('app').innerHTML='<div class="loading"><div class="spinner"></div>Loading…</div>';
+  if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){document.getElementById('app').innerHTML='<div class="loading">Setup needed.</div>';return;}
+  const {data:sess}=await sb.auth.getSession();
+  if(!sess.session){location.replace('index.html');return;}
+  ME=sess.session.user?.email||'';
+  weekKey=getWeekKey();
+  try{
+    const [clientsRes,bookRes,holdRes,thisRes,lastRes]=await Promise.all([
+      sb.from('clients').select('full_name,first_name,surname,email,membership,coach_count,status').not('coach_count','is',null),
+      sb.from('invoices').select('raw_text').eq('source','pt-bookings').order('created_at',{ascending:false}).limit(1).maybeSingle(),
+      sb.from('invoices').select('raw_text').eq('source','holds-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle(),
+      sb.from('followup_status').select('client_email,status,notes').eq('week_key',weekKey),
+      sb.from('followup_status').select('client_email,status,notes').eq('week_key',lastWeekKey()),
+    ]);
+    const clients=(clientsRes.data||[])
+      .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||''))
+      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||''}));
+    bookingsMap=(()=>{try{return JSON.parse(bookRes.data.raw_text).bookings||{};}catch(e){return{};}})();
+    const holds=(()=>{try{return JSON.parse(holdRes.data.raw_text).holds||[];}catch(e){return[];}})();
+    const toMap=rows=>{const m={};for(const r of (rows||[]))m[(r.client_email||'').toLowerCase()]={status:r.status,notes:r.notes};return m;};
+    allClients=buildClients(clients,holds,toMap(thisRes.data),toMap(lastRes.data));
+    render();
+  }catch(err){
+    document.getElementById('app').innerHTML=`<div class="loading"><div style="color:#ef4444;font-size:24px">⚠️</div>Error loading data: ${esc(err.message||err)}<br><button class="refresh-btn" onclick="boot()">Try again</button></div>`;
+  }
+}
+boot();
+</script>
+</body>
+</html>

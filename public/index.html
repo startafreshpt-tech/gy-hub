@@ -44,6 +44,7 @@ const TOOLS=[
   {ic:'🧾',t:'Invoice Reconciliation',d:'Check trainer invoices vs GymMaster sessions, pods, squads, admin & GST.',href:'invoice.html',live:true},
   {ic:'🏅',t:'Trainerize Milestones',d:'Member milestones, clubs, goals and leaderboard from Trainerize.',href:'milestones.html',live:true},
   {ic:'📉',t:'Studio Pulse',d:'Churn risk, LTV, tenure and retention signals.',href:'studio-pulse.html',live:true},
+  {ic:'📞',t:'Client Follow-Up',d:'Weekly check-in tracker — paused, returning, booked & due clients. Shared with your team.',href:'followup.html',live:true},
 ];
 async function init(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#root').innerHTML='<div class="auth"><h2>Setup needed</h2><p>Edit config.js.</p></div>';return;}
