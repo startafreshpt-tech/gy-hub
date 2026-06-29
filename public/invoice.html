@@ -75,7 +75,8 @@ const norm=s=>(s||'').toLowerCase().replace(/['’\-\s.]/g,'');
 
 // Admin weekly-hour caps by caseload band (updated when Trainerize caseload syncs)
 const ADMIN_CAP={Caron:1.0,Ethan:2.5,Laura:1.5,Natalie:1.5};
-const GST_TRAINERS=['Gavyn','Ethan','Caron','Laura']; const GST=0.15; // Scott salaried (no GST)
+const GST_TRAINERS=['Gavyn','Ethan','Caron']; const GST=0.15; // Scott salaried, Laura is a casual employee (no GST)
+const EMPLOYEES=['Laura']; const HOLIDAY_PCT=0.08; // casual employees: 8% holiday pay, no GST
 const CASELOAD={Gavyn:64,Scott:91,Caron:6,Ethan:49,Laura:22,Natalie:24}; // current Trainerize client numbers
 let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
 
@@ -167,8 +168,18 @@ function buildInvoiceAOA(S, trainer, from, to, rate, gstable, excludedSigs){
   aoa.push(['TOTAL Qty','',t.m30,'',t.m45,'',t.m60,'',t.sqd,'',t.pod,'','',t.sales]);
   aoa.push(['Rate','',v.m30,'',v.m45,'',v.m60,'',v.sqd,'',v.pod]);
   aoa.push([]);
-  aoa.push(['TOTAL INVOICED (ex GST)','$'+cost.toFixed(2)]);
-  if(gstable){aoa.push(['GST 15%','$'+(cost*0.15).toFixed(2)]);aoa.push(['TOTAL incl GST','$'+(cost*1.15).toFixed(2)]);}
+  const isEmp=EMPLOYEES.includes(trainer); const holiday=isEmp?cost*HOLIDAY_PCT:0;
+  if(isEmp){
+    aoa.push(['Session value','$'+cost.toFixed(2)]);
+    aoa.push(['Holiday pay 8% (casual employee)','$'+holiday.toFixed(2)]);
+    aoa.push(['TOTAL GROSS PAY (no GST)','$'+(cost+holiday).toFixed(2)]);
+  } else if(gstable){
+    aoa.push(['TOTAL INVOICED (ex GST)','$'+cost.toFixed(2)]);
+    aoa.push(['GST 15%','$'+(cost*0.15).toFixed(2)]);
+    aoa.push(['TOTAL incl GST','$'+(cost*1.15).toFixed(2)]);
+  } else {
+    aoa.push(['TOTAL INVOICED','$'+cost.toFixed(2)]);
+  }
   return {aoa,totals:t,cost};
 }
 function downloadInvoiceSheet(){
@@ -183,7 +194,7 @@ function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd
 function updateCash(i,val){const e=STATE.expected;if(!e||!e._salesRows[i])return;e._salesRows[i].cash=val.replace(/[^0-9.]/g,'');const tot=e._salesRows.reduce((a,r)=>a+(Number(String(r.cash).replace(/[^0-9.]/g,''))||0),0);const el=document.getElementById('cashTotal');if(el)el.textContent=money(tot);STATE.outHTML=document.getElementById('out').innerHTML;}
 function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate,sales:0};return v[r.group]||0;}
 function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el.checked:!e._excluded.has(i);if(billed)e._excluded.delete(i);else e._excluded.add(i);if(el){if(el.checked)el.setAttribute('checked','checked');else el.removeAttribute('checked');}recomputeInvoice();}
-function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const grand=e.gstable?sum*(1+GST):sum;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
+function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const holiday=e.isEmp?sum*(e.holPct||0):0;const grand=(e.gstable?sum*(1+GST):sum)+holiday;e.holiday=holiday;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
 
 async function genExpected(){
   const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
@@ -203,7 +214,8 @@ async function genExpected(){
   const squad$=squads.length*rate;
   const cap=ADMIN_CAP[trainer]||0, wks=weeksBetween(from,to), adminHrs=cap*wks, admin$=adminHrs*rate;
   const total=one$+pod$+squad$+admin$;
-  const gstable=GST_TRAINERS.includes(trainer); const gstAmt=gstable?total*GST:0; const grand=total+gstAmt;
+  const isEmp=EMPLOYEES.includes(trainer); const holPct=isEmp?HOLIDAY_PCT:0; const holiday=total*holPct;
+  const gstable=GST_TRAINERS.includes(trainer)&&!isEmp; const gstAmt=gstable?total*GST:0; const grand=total+holiday+gstAmt;
   const perClient={};
   oneRows.forEach(s=>{const k=s.client_name||'—';(perClient[k]??={slots:new Set(),att:0,amt:0});perClient[k].slots.add(s.session_date+'|'+(s.start_time||''));if(s.attended){perClient[k].att++;perClient[k].amt+=(Number(s.billable_minutes||0)/60)*rate;}});
   const pcRows=Object.entries(perClient).map(([n,v])=>({n,booked:v.slots.size,att:v.att,amt:v.amt})).sort((a,b)=>b.booked-a.booked);
@@ -216,10 +228,10 @@ async function genExpected(){
     ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s)})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};return{date:s.session_date,person:nm||'Discovery call',lead:ci.lead||'',membership:ci.membership||'',cash:ci.signup||'',sig:sigOf(s)};}).sort((a,b)=>a.date.localeCompare(b.date));
-  STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
+  STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,isEmp,holPct,holiday,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
-     <div class="card"><div class="k">Expected total</div><div class="v" id="expTotal">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
+     <div class="card"><div class="k">Expected total</div><div class="v" id="expTotal">${money(grand)}</div><div class="sub">${isEmp?'incl 8% holiday, no GST · ':(gstable?'incl GST · ':'')}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
      <div class="card"><div class="k">1-on-1 checked in</div><div class="v">${oneAttDed.length}</div><div class="sub">of ${oneAllDed.length} booked</div></div>
      <div class="card"><div class="k">Squads</div><div class="v">${squads.length}</div></div>
      <div class="card"><div class="k">Admin cap</div><div class="v">${adminHrs}h</div><div class="sub">${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk</div></div>
@@ -231,8 +243,9 @@ async function genExpected(){
      <div class="line"><span class="lbl">Pods <small>${pods.length} sessions</small></span><span class="amt">${money(pod$)}</span></div>
      <div class="line"><span class="lbl">Squads <small>${squads.length} × ${money(rate)}</small></span><span class="amt">${money(squad$)}</span></div>
      <div class="line"><span class="lbl">Admin <small>${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk × ${wks}wk = ${adminHrs}h</small></span><span class="amt">${money(admin$)}</span></div>
+     ${isEmp?`<div class="line"><span class="lbl">Holiday pay 8% <small>casual employee</small></span><span class="amt">${money(holiday)}</span></div>`:''}
      ${gstable?`<div class="line"><span class="lbl">GST 15%</span><span class="amt">${money(gstAmt)}</span></div>`:''}
-     <div class="tot"><span>Expected total${gstable?' (incl GST)':''}</span><span>${money(grand)}</span></div>
+     <div class="tot"><span>Expected total${isEmp?' (incl holiday)':(gstable?' (incl GST)':'')}</span><span>${money(grand)}</span></div>
    </div>
    <div class="panel" style="overflow-x:auto"><h3>Session list — untick anyone you\'re not billing</h3>
      <table><thead><tr><th>Bill?</th><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th class="num">$</th></tr></thead>
