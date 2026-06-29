@@ -76,6 +76,13 @@ export default async () => {
     } catch (e) { /* none yet */ }
     const normName = n => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
+    // Manual coach reassignments (set in the Follow-Up dropdown) — these win.
+    let manualById = {};
+    try {
+      const mor = await fetch(`${SB_URL}/rest/v1/coach_overrides?select=gm_member_id,coach`, { headers: H() });
+      const mo = await mor.json();
+      for (const r of (Array.isArray(mo) ? mo : [])) manualById[String(r.gm_member_id)] = r.coach;
+    } catch (e) { /* table may not exist yet */ }
     const cr = await fetch(`${SB_URL}/rest/v1/clients?select=gm_member_id,email,full_name`, { headers: H() });
     const clients = await cr.json();
     const byId = {}, byEmail = {};
@@ -84,7 +91,7 @@ export default async () => {
       const em = String(c.email || '').toLowerCase();
       const nm = normName(c.full_name);
       // Trainerize override wins; else GymMaster session coach; else nothing.
-      let coach = ov.byEmail[em] || ov.byName[nm] || null;
+      let coach = manualById[String(c.gm_member_id)] || ov.byEmail[em] || ov.byName[nm] || null;
       if (coach) overridden++;
       if (!coach) { coach = mc.byId[String(c.gm_member_id)] || mc.byEmail[em] || null; if (coach) fromGm++; }
       if (!coach) { coach = gmById[String(c.gm_member_id)] || null; if (coach) fromGm++; }

@@ -49,6 +49,9 @@ a{color:#1a3a2a}
 @keyframes spin{to{transform:rotate(360deg)}}
 .empty-state{padding:40px;text-align:center;color:#94a3b8}
 .muted{color:#94a3b8}
+.coachpick{display:inline-flex;align-items:center;gap:3px;background:#eef2ff;border-radius:10px;padding:1px 6px}
+.coachpick .coachico{font-size:11px}
+.coachpick select{border:none;background:transparent;color:#3730a3;font-weight:700;font-size:11px;cursor:pointer;outline:none;padding:2px 2px}
 </style>
 </head>
 <body>
@@ -84,7 +87,8 @@ function getStatus(id){return STATUSES.find(s=>s.id===id)||STATUSES[1];}
 function shortenPlan(p){if(!p)return'';return p.replace(/^\s*\[\d{4}\]\s*/,'').replace(/\s*-\s*Billed?\s*Weekly\s*$/i,'').replace(/\s+/g,' ').trim();}
 function lastKeyOf(surname){return String(surname||'').toLowerCase().replace(/['\-\s]/g,'');}
 
-let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, bookingsById={}, COACHES={byId:{},byEmail:{}}, weekKey=getWeekKey();
+let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, bookingsById={}, COACHES={byId:{},byEmail:{}}, OVERRIDES={}, weekKey=getWeekKey();
+const COACH_LIST=['Gavyn','Scott','Caron','Ethan','Laura','Natalie','Kerry','Ross','Emma'];
 
 function findHolds(c,holds){const last=(c.surname||'').toLowerCase();const first=(c.firstName||'').toLowerCase();
   return holds.filter(h=>{if((h.last||'')!==last)return false;if(h.first&&first&&!first.includes(h.first)&&!h.first.includes(first))return false;return true;});}
@@ -161,7 +165,7 @@ function renderCard(c,idx){
         ${c.tag==='hold'?'<span class="badge badge-hold">On Hold</span>':''}
       </div>
       <div class="client-meta">
-        <span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-weight:600">👤 ${esc(c.coach)}</span>
+        <span class="coachpick" title="Reassign coach"><span class="coachico">👤</span><select onchange="reassignCoach(${idx},this.value)" onclick="event.stopPropagation()">${[...COACH_LIST,'Unassigned'].map(n=>`<option value="${n}"${c.coach===n?' selected':''}>${n}</option>`).join('')}</select></span>
         ${c.plan?`<span>📋 ${esc(c.plan)}</span>`:''}
         ${c.booking?`<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-weight:600">✅ Booked — ${esc(c.booking)}</span>`:`<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-weight:600">⚠️ Not booked</span>`}
         ${prevLabel?`<span class="muted">Last week: ${esc(prevLabel)}</span>`:''}
@@ -216,6 +220,16 @@ function copySummary(){
     paused.length?`Paused (${paused.length}): ${paused.map(c=>c.name).join(', ')}`:'','','FULL STATUS LIST:',...lines].filter(l=>l!=='').join('\n');
   navigator.clipboard.writeText(txt).then(()=>alert('Weekly summary copied to clipboard.'),()=>alert('Could not copy.'));
 }
+async function reassignCoach(idx,coach){
+  const c=allClients[idx];
+  c.coach=coach;
+  if(c.memberId!=null){
+    OVERRIDES[String(c.memberId)]=coach;
+    try{await sb.from('coach_overrides').upsert({gm_member_id:c.memberId,coach,updated_by:ME,updated_at:new Date().toISOString()},{onConflict:'gm_member_id'});}
+    catch(e){console.warn('coach save failed',e);}
+  }
+  render();
+}
 async function signOut(){await sb.auth.signOut();location.replace('index.html');}
 
 async function boot(){
@@ -228,18 +242,20 @@ async function boot(){
   ME=sess.session.user?.email||'';
   weekKey=getWeekKey();
   try{
-    const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes]=await Promise.all([
+    const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes,ovRes]=await Promise.all([
       sb.from('clients').select('full_name,first_name,surname,email,membership,gm_member_id,status'),
       sb.from('invoices').select('raw_text').eq('source','pt-bookings').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('invoices').select('raw_text').eq('source','holds-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',weekKey),
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',lastWeekKey()),
       sb.from('invoices').select('raw_text').eq('source','client-coaches').order('created_at',{ascending:false}).limit(1).maybeSingle(),
+      sb.from('coach_overrides').select('gm_member_id,coach'),
     ]);
     COACHES=(()=>{try{const d=JSON.parse(coachRes.data.raw_text);return{byId:d.byId||{},byEmail:d.byEmail||{}};}catch(e){return{byId:{},byEmail:{}};}})();
+    OVERRIDES={}; for(const o of (ovRes.data||[])) OVERRIDES[String(o.gm_member_id)]=o.coach;
     const clients=(clientsRes.data||[])
       .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||''))
-      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',memberId:c.gm_member_id,coach:COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
+      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',memberId:c.gm_member_id,coach:OVERRIDES[String(c.gm_member_id)]||COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
     (()=>{try{const d=JSON.parse(bookRes.data.raw_text);bookingsMap=d.bookings||{};bookingsById=d.byId||{};}catch(e){bookingsMap={};bookingsById={};}})();
     const holds=(()=>{try{return JSON.parse(holdRes.data.raw_text).holds||[];}catch(e){return[];}})();
     const toMap=rows=>{const m={};for(const r of (rows||[]))m[(r.client_email||'').toLowerCase()]={status:r.status,notes:r.notes};return m;};
