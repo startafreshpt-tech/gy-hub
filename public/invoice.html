@@ -136,6 +136,46 @@ async function viewCheck(){
 }
 function weeksBetween(from,to){const d=(new Date(to)-new Date(from))/86400000+1;return Math.max(1,Math.round(d/7));}
 
+// ── Generate a downloadable invoice spreadsheet in the trainer's template layout ──
+function fmtName(n){const p=String(n||'').trim().split(/\s+/);if(p.length<2)return n||'';return p[p.length-1]+', '+p.slice(0,-1).join(' ');}
+function buildInvoiceAOA(S, trainer, from, to, rate, gstable){
+  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
+  const grp=s=>{ if(s.session_kind==='squad')return 'sqd'; if(s.session_kind==='pod')return 'pod'; if(s.session_kind==='sales')return 'sales';
+    if(['individual','onboard','couple'].includes(s.session_kind)){const m=Number(s.billable_minutes||0);if(m<=30)return 'm30';if(m<=45)return 'm45';return 'm60';} return null; };
+  const rows=dedupe(S).filter(s=>{const g=grp(s);if(!g)return false;return ['m30','m45','m60'].includes(g)?s.attended:true;});
+  const byDay={}; for(const s of rows){(byDay[s.session_date]=byDay[s.session_date]||[]).push(s);}
+  const COL={m30:1,m45:3,m60:5,sqd:7,pod:9,sales:12};
+  const aoa=[];
+  aoa.push([`${trainer} — invoice (auto-generated from GymMaster check-ins)`]);
+  aoa.push([`Period ${from} to ${to}`]);
+  aoa.push(['Day','30-min','Qty','45-min','Qty','60-min','Qty','Squad','Qty','Pod','Qty','Admin','Sales/Discovery','Qty','Cash','Lead type']);
+  const totals={m30:0,m45:0,m60:0,sqd:0,pod:0,sales:0};
+  for(const d of Object.keys(byDay).sort()){
+    const dayNum=new Date(d).getDate(); const colItems={};
+    for(const s of byDay[d]){const g=grp(s);const c=COL[g];(colItems[c]=colItems[c]||[]).push(fmtName(s.client_name));totals[g]++;}
+    const maxRows=Math.max(1,...Object.values(colItems).map(a=>a.length));
+    for(let r=0;r<maxRows;r++){const row=new Array(16).fill('');if(r===0)row[0]=dayNum;
+      for(const c of Object.keys(colItems)){const nm=colItems[c][r];if(nm){row[c]=nm;if([1,3,5,7,9,12].includes(+c))row[+c+1]=1;}}
+      aoa.push(row);}
+  }
+  const t=totals; const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,sqd:rate,pod:(30/60)*rate};
+  const cost=t.m30*v.m30+t.m45*v.m45+t.m60*v.m60+t.sqd*v.sqd+t.pod*v.pod;
+  aoa.push([]);
+  aoa.push(['TOTAL Qty','',t.m30,'',t.m45,'',t.m60,'',t.sqd,'',t.pod,'','',t.sales]);
+  aoa.push(['Rate','',v.m30,'',v.m45,'',v.m60,'',v.sqd,'',v.pod]);
+  aoa.push([]);
+  aoa.push(['TOTAL INVOICED (ex GST)','$'+cost.toFixed(2)]);
+  if(gstable){aoa.push(['GST 15%','$'+(cost*0.15).toFixed(2)]);aoa.push(['TOTAL incl GST','$'+(cost*1.15).toFixed(2)]);}
+  return {aoa,totals:t,cost};
+}
+function downloadInvoiceSheet(){
+  const e=STATE.expected; if(!e||!e._sessions){alert('Click “Generate expected” first.');return;}
+  const {aoa}=buildInvoiceAOA(e._sessions, e.trainer, e.from, e.to, e.rate, e.gstable);
+  const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Invoice');
+  XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
+}
+
 async function genExpected(){
   const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
   $('#out').innerHTML='<div class="loading"><div class="spinner"></div>Building expected invoice…</div>';
@@ -157,7 +197,7 @@ async function genExpected(){
   const perClient={};
   oneRows.forEach(s=>{const k=s.client_name||'—';(perClient[k]??={slots:new Set(),att:0,amt:0});perClient[k].slots.add(s.session_date+'|'+(s.start_time||''));if(s.attended){perClient[k].att++;perClient[k].amt+=(Number(s.billable_minutes||0)/60)*rate;}});
   const pcRows=Object.entries(perClient).map(([n,v])=>({n,booked:v.slots.size,att:v.att,amt:v.amt})).sort((a,b)=>b.booked-a.booked);
-  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length};
+  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S};
   $('#out').innerHTML=`
    <div class="cards">
      <div class="card"><div class="k">Expected total</div><div class="v">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
@@ -165,7 +205,7 @@ async function genExpected(){
      <div class="card"><div class="k">Squads</div><div class="v">${squads.length}</div></div>
      <div class="card"><div class="k">Admin cap</div><div class="v">${adminHrs}h</div><div class="sub">${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk</div></div>
    </div>
-   <div style="margin:4px 0 12px"><button class="btn sec" onclick="saveCheck()">💾 Save this check to records</button> <span id="saveMsg" class="small"></span></div>
+   <div style="margin:4px 0 12px"><button class="btn" onclick="downloadInvoiceSheet()">⬇ Download invoice (.xlsx)</button> <button class="btn sec" onclick="saveCheck()">💾 Save this check to records</button> <span id="saveMsg" class="small"></span></div>
    ${oneAllDed.length>oneAttDed.length?`<div class="note">⚠️ ${oneAllDed.length-oneAttDed.length} of ${trainer}'s 1-on-1s were booked but <b>not checked in</b> — so they don't count toward expected. If they happened, ${trainer} needs to check clients in.</div>`:''}
    <div class="panel"><h3>Expected invoice (what GymMaster supports)</h3>
      <div class="line"><span class="lbl">1-on-1 coaching <small>${oneAttDed.length} checked-in, by duration</small></span><span class="amt">${money(one$)}</span></div>
