@@ -11,7 +11,7 @@ const SB_URL   = process.env.SUPABASE_URL;
 const SB_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE='https://api.trainerize.com/v03';
 const AUTH='Basic '+Buffer.from(`${GROUP_ID}:${TOKEN}`).toString('base64');
-const POOL=16, LB2KG=0.45359237, WIN=45;
+const POOL=6, LB2KG=0.45359237, WIN=45;
 const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 const iso=d=>d.toISOString().slice(0,10);
 const today=iso(TODAY);
@@ -28,10 +28,12 @@ async function api(path,body,retries=3){
       const r=await fetch(`${BASE}${path}`,{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
       clearTimeout(to);
       const txt=await r.text(); let j; try{j=JSON.parse(txt)}catch{j=null}
-      if(j&&r.status<500)return j;
+      if(j&&r.status<500&&r.status!==429)return j;   // 429 = rate limited -> retry
       if(a===retries)return j||{_http:r.status};
+      await sleep((r.status===429?1500:500)*(a+1));
+      continue;
     }catch(e){if(a===retries)return{_err:String(e)};}
-    await sleep(400*(a+1));
+    await sleep(500*(a+1));
   }
 }
 async function pool(items,worker,n=POOL){const out=new Array(items.length);let i=0;
