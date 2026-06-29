@@ -72,16 +72,7 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   let ytd=null,mtd=null;
   if(dt_now&&bw_now!=null){if(dt_now>=jan1){const b=await baseline(jan1);if(b!=null)ytd=round1((b-bw_now)*LB2KG);}if(dt_now>=monthStart){const b=await baseline(monthStart);if(b!=null)mtd=round1((b-bw_now)*LB2KG);}}
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const ex=extractAccomplishments(acc&&acc.stats);const yA=parseD(m.created);
-  // Trainerize's authoritative lifetime totals — the calendar walk above
-  // undercounts badly for long-tenure members (e.g. 1000-club). Use these.
-  const summ=await api('/user/getClientSummary',{userID:uid,unitWeight:'kg'});
-  const sR=(summ&&summ.Response)||(summ&&summ.result)||summ||{};
-  const wTot=Number.isFinite(sR.workoutsTotal)?sR.workoutsTotal:null;
-  const cTot=Number.isFinite(sR.cardioTotal)?sR.cardioTotal:null;
-  if(!globalThis.__dbgSumm){globalThis.__dbgSumm={name:m.name,keys:Object.keys(sR||{}).slice(0,15),workoutsTotal:sR.workoutsTotal,wTot,snippet:JSON.stringify(summ).slice(0,300)};}
-  const lifeGym=wTot!=null?Math.max(wTot,wDates.length):wDates.length;
-  const lifeAct=cTot!=null?Math.max(cTot,cDates.length):cDates.length;
-  return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:lifeGym,activities:lifeAct,combined:lifeGym+lifeAct,
+  return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:wDates.length,activities:cDates.length,combined:wDates.length+cDates.length,
     month:cntSince(wDates,monthStart),d30:cntSince(wDates,d30),act_month:cntSince(cDates,monthStart),act_30d:cntSince(cDates,d30),
     last_workout:wDates.length?wDates.sort().slice(-1)[0]:null,pr:ex.pr,mil:ex.mil,wt_loss_kg:wt_loss,measure_age:age,bf_now:num(bf_now),
     tenure_years:yA?Math.round((TODAY-yA)/864e5/365.25*10)/10:null,ytd_loss:ytd,mtd_loss:mtd,
@@ -127,6 +118,16 @@ function lookupMembership(name,map){
 async function buildDATA(){
   const membershipMap=await loadMembershipMap();
   const activeRaw=await getActive();const active=await pool(activeRaw,processActive);
+  // Authoritative lifetime/activity totals in a SEPARATE low-concurrency pass.
+  // getClientSummary is reliable alone but Trainerize rate-limits (429) when it's
+  // mixed into the heavy per-member pool — which had emptied the 1000 Club.
+  await pool(active, async(a)=>{
+    const summ=await api('/user/getClientSummary',{userID:a.id,unitWeight:'kg'});
+    const sR=(summ&&summ.Response)||(summ&&summ.result)||summ||{};
+    if(Number.isFinite(sR.workoutsTotal)) a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
+    if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
+    a.combined=(a.lifetime||0)+(a.activities||0);
+  }, 5);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now)alltime=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);
     return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:a.wt_loss_kg,measure_age:a.measure_age,bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});

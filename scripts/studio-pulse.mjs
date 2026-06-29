@@ -627,6 +627,7 @@ async function fetchTrainerizeMap(creds, today) {
   console.error(`  -> ${users.length} Trainerize clients found. Fetching workout summaries...`);
 
   const tzMap = new Map();
+  const tzByEmail = new Map();
   for (let i = 0; i < users.length; i++) {
     const u = users[i];
     const first = u.firstName || '';
@@ -656,29 +657,32 @@ async function fetchTrainerizeMap(creds, today) {
       workoutsTotal = 0; wpw = 0; lastApp = 'Not yet'; lastActive = 'Not yet'; habitsDone = 0;
     }
 
+    const entry = {
+      full_name: fullName,
+      trainerize_id: String(u.id),
+      last_signin: lastSignin,
+      last_app_open: lastApp,
+      last_active: lastActive,
+      signins_per_week: '-',
+      workouts_per_week: wpw ? String(wpw) : '-',
+      total_workouts: String(workoutsTotal),
+      habits_tracked: habitsDone > 0,
+    };
+    const em = String(u.email || '').toLowerCase().trim();
+    if (em.includes('@')) tzByEmail.set(em, entry);
     if (fullName) {
       const parts = fullName.split(/\s+/).filter(Boolean);
       if (parts.length >= 2) {
         const key = makeKey(parts[0], parts[parts.length - 1]);
         if (!tzMap.has(key)) tzMap.set(key, []);
-        tzMap.get(key).push({
-          full_name: fullName,
-          trainerize_id: String(u.id),
-          last_signin: lastSignin,
-          last_app_open: lastApp,
-          last_active: lastActive,
-          signins_per_week: '-',
-          workouts_per_week: wpw ? String(wpw) : '-',
-          total_workouts: String(workoutsTotal),
-          habits_tracked: habitsDone > 0,
-        });
+        tzMap.get(key).push(entry);
       }
     }
 
     if ((i + 1) % 10 === 0) console.error(`    ...${i + 1}/${users.length}`);
     await sleep(150); // gentle rate limiting — matches refresh_trainerize.py's time.sleep(0.15)
   }
-  return tzMap;
+  return { tzMap, tzByEmail };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1094,7 +1098,15 @@ async function run() {
 
   // 1. Trainerize — login + client list + per-client summaries (live, no CSV)
   console.error('  Refreshing Trainerize data...');
-  const tzMap = await fetchTrainerizeMap(TRAINERIZE_CREDS, today);
+  const { tzMap, tzByEmail } = await fetchTrainerizeMap(TRAINERIZE_CREDS, today);
+  // GymMaster Member ID -> email bridge (the standard_report has no email, but the
+  // clients table synced from the portal API does) — enables reliable email matching.
+  const memberIdToEmail = new Map();
+  try {
+    const er = await fetch(`${SUPABASE_URL}/rest/v1/clients?select=gm_member_id,email`, { headers: SB_H() });
+    const erows = await er.json();
+    for (const c of (Array.isArray(erows) ? erows : [])) if (c.email) memberIdToEmail.set(String(c.gm_member_id), String(c.email).toLowerCase());
+  } catch (e) { /* fall back to name matching */ }
   const tzClientCount = [...tzMap.values()].reduce((a, l) => a + l.length, 0);
   console.error(`  -> ${tzClientCount} Trainerize clients loaded`);
 
@@ -1167,11 +1179,25 @@ async function run() {
     }
   }
   let matched = 0;
+  const matchedTz = new Set();
+  // (a) email match — most reliable
+  for (const c of clients) {
+    const em = (memberIdToEmail.get(String(c.member_id)) || '').toLowerCase();
+    if (em && tzByEmail.has(em)) {
+      const entry = tzByEmail.get(em);
+      if (!matchedTz.has(entry.trainerize_id) && !c.on_trainerize) {
+        addTrainerizeSignals(c, entry, weights, today);
+        matchedTz.add(entry.trainerize_id); matched++;
+      }
+    }
+  }
+  // (b) name-key fallback (first name + last initial, strict 1:1) for the rest
   for (const [key, tzList] of tzMap.entries()) {
-    const gmList = gmKeyMap.get(key) || [];
-    if (gmList.length === 1 && tzList.length === 1) {
-      addTrainerizeSignals(gmList[0], tzList[0], weights, today);
-      matched++;
+    const gmList = (gmKeyMap.get(key) || []).filter(c => !c.on_trainerize);
+    const avail = tzList.filter(t => !matchedTz.has(t.trainerize_id));
+    if (gmList.length === 1 && avail.length === 1) {
+      addTrainerizeSignals(gmList[0], avail[0], weights, today);
+      matchedTz.add(avail[0].trainerize_id); matched++;
     }
   }
   console.error(`  Trainerize: ${matched} clients matched`);
