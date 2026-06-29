@@ -70,7 +70,15 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   let ytd=null,mtd=null;
   if(dt_now&&bw_now!=null){if(dt_now>=jan1){const b=await baseline(jan1);if(b!=null)ytd=round1((b-bw_now)*LB2KG);}if(dt_now>=monthStart){const b=await baseline(monthStart);if(b!=null)mtd=round1((b-bw_now)*LB2KG);}}
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const ex=extractAccomplishments(acc&&acc.stats);const yA=parseD(m.created);
-  return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:wDates.length,activities:cDates.length,combined:wDates.length+cDates.length,
+  // Trainerize's authoritative lifetime totals — the calendar walk above
+  // undercounts badly for long-tenure members (e.g. 1000-club). Use these.
+  const summ=await api('/user/getClientSummary',{userID:uid,unitWeight:'kg'});
+  const sR=summ&&(summ.Response!==undefined?summ.Response:summ);
+  const wTot=sR&&Number.isFinite(sR.workoutsTotal)?sR.workoutsTotal:null;
+  const cTot=sR&&Number.isFinite(sR.cardioTotal)?sR.cardioTotal:null;
+  const lifeGym=wTot!=null?Math.max(wTot,wDates.length):wDates.length;
+  const lifeAct=cTot!=null?Math.max(cTot,cDates.length):cDates.length;
+  return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:lifeGym,activities:lifeAct,combined:lifeGym+lifeAct,
     month:cntSince(wDates,monthStart),d30:cntSince(wDates,d30),act_month:cntSince(cDates,monthStart),act_30d:cntSince(cDates,d30),
     last_workout:wDates.length?wDates.sort().slice(-1)[0]:null,pr:ex.pr,mil:ex.mil,wt_loss_kg:wt_loss,measure_age:age,bf_now:num(bf_now),
     tenure_years:yA?Math.round((TODAY-yA)/864e5/365.25*10)/10:null,ytd_loss:ytd,mtd_loss:mtd,
