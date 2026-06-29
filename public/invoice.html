@@ -112,6 +112,8 @@ function render(){
 }
 function setTab(t){if(STATE.tab==='check'){const a=$('#trn'),b=$('#from'),c=$('#to');if(a&&b&&c)STATE.check={trainer:a.value,from:b.value,to:c.value};}STATE.tab=t;render();}
 async function loadTrainers(){if(!STATE.trainers.length){const{data}=await sb.from('trainers').select('*').eq('active',true).order('is_contractor',{ascending:false}).order('name');STATE.trainers=data||[];}return STATE.trainers;}
+async function loadClientsMap(){if(!STATE.clientsMap){const{data}=await sb.from('clients').select('full_name,membership,lead_source');const m={};for(const c of (data||[])){if(c.full_name)m[c.full_name.toLowerCase()]={membership:c.membership||'',lead:c.lead_source||''};}STATE.clientsMap=m;}return STATE.clientsMap;}
+function priceFromMembership(p){if(!p)return null;const m=String(p).match(/\$([\d,]+(?:\.\d+)?)/);return m?m[1].replace(/,/g,''):null;}
 
 // ---------------- INVOICE CHECK ----------------
 async function viewCheck(){
@@ -178,6 +180,7 @@ function downloadInvoiceSheet(){
   XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
 }
 function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad',sales:'Discovery'}[g]||g;}
+function updateCash(i,val){const e=STATE.expected;if(!e||!e._salesRows[i])return;e._salesRows[i].cash=val.replace(/[^0-9.]/g,'');const tot=e._salesRows.reduce((a,r)=>a+(Number(String(r.cash).replace(/[^0-9.]/g,''))||0),0);const el=document.getElementById('cashTotal');if(el)el.textContent=money(tot);STATE.outHTML=document.getElementById('out').innerHTML;}
 function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate,sales:0};return v[r.group]||0;}
 function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el.checked:!e._excluded.has(i);if(billed)e._excluded.delete(i);else e._excluded.add(i);if(el){if(el.checked)el.setAttribute('checked','checked');else el.removeAttribute('checked');}recomputeInvoice();}
 function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const grand=e.gstable?sum*(1+GST):sum;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
@@ -186,6 +189,7 @@ async function genExpected(){
   const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
   $('#out').innerHTML='<div class="loading"><div class="spinner"></div>Building expected invoice…</div>';
   const tr=STATE.trainers.find(t=>t.name===trainer)||{};
+  const cmap=await loadClientsMap();
   const rate=Number(tr.rate_per_hour||50);
   const {data:sess}=await sb.from('sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
   const S=sess||[];
@@ -211,7 +215,8 @@ async function genExpected(){
     ...squads.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Squad',group:'sqd',mins:60,sig:sigOf(s)})),
     ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s)})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
-  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
+  const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};return{date:s.session_date,person:nm||'Discovery call',lead:ci.lead||'',membership:ci.membership||'',cash:priceFromMembership(ci.membership)||'',sig:sigOf(s)};}).sort((a,b)=>a.date.localeCompare(b.date));
+  STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
      <div class="card"><div class="k">Expected total</div><div class="v" id="expTotal">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
@@ -234,6 +239,12 @@ async function genExpected(){
      <tbody>${billRows.map((r,i)=>`<tr><td style="text-align:center"><input type="checkbox" checked onchange="toggleBill(${i},this)"></td><td>${r.date}</td><td>${r.time}</td><td>${r.client}</td><td>${labelOf(r.group)}</td><td class="num">${money(rowAmtG(r,rate))}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No billable sessions in this period.</td></tr>'}</tbody></table>
      <div class="tot"><span><span id="billCount">${billRows.length}</span> sessions billed${gstable?' (total incl GST)':''}</span><span id="liveTotal">${money(grand)}</span></div>
      <p class="small" style="margin-top:6px">Untick a session you saw but won\'t bill (e.g. a comp) — the total and the downloaded invoice both update.${admin$>0?' Admin '+money(admin$)+' is added on top.':''}</p>
+   </div>
+   <div class="panel" style="overflow-x:auto;border:2px solid #1a3a2a"><h3>📈 Discovery / Sales — monitor conversions &amp; cash</h3>
+     ${salesRows.length?`<table><thead><tr><th>Date</th><th>Person</th><th>Lead source</th><th>Signed up</th><th class="num">Cash collected</th></tr></thead>
+     <tbody>${salesRows.map((r,i)=>`<tr><td>${r.date}</td><td>${r.person}</td><td>${r.lead||'<span class=muted>—</span>'}</td><td>${r.membership?'<span style=color:#15803d>'+r.membership.replace(/^\s*\[\d{4}\]\s*/,'')+'</span>':'<span class=muted>not yet</span>'}</td><td class="num"><input type="text" value="${r.cash?'$'+r.cash:''}" placeholder="$" style="width:90px;text-align:right;border:1px solid #d7dae3;border-radius:5px;padding:3px 6px" oninput="updateCash(${i},this.value)"></td></tr>`).join('')}</tbody></table>
+     <div class="tot"><span>${salesRows.length} discovery call${salesRows.length>1?'s':''} · total cash collected</span><span id="cashTotal">${money(salesRows.reduce((a,r)=>a+(Number(String(r.cash).replace(/[^0-9.]/g,''))||0),0))}</span></div>
+     <p class="small" style="margin-top:6px">Lead source is pulled from GymMaster. "Signed up" auto-fills when the prospect becomes a member with a membership. Cash is editable — adjust to the actual amount collected.</p>`:'<div class="note">No discovery/sales calls found for this period. They appear here once captured in the next sync (booking titled Discovery/Sales/Consult).</div>'}
    </div>`;
   STATE.outHTML=document.getElementById('out').innerHTML;
   renderCompare();

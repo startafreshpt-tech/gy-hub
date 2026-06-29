@@ -236,6 +236,7 @@ export default async () => {
           email: m.email, status: m.status,
           membership: active ? active.name : null,
           coach_weeks: cz ? cz.weeks : null, coach_minutes: cz ? cz.minutes : null, coach_count: cz ? cz.count : null,
+          lead_source: m.sourcepromotion || m.source || m.leadsource || null,
           last_synced: new Date().toISOString(),
         }], 'gm_member_id');
         if (rows.length) { await sbUpsert('sessions', rows, 'gm_booking_id'); upserted += rows.length; }
