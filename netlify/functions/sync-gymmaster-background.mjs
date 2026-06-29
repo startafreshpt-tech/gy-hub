@@ -167,6 +167,8 @@ export default async () => {
         const login = await gmPost('/portal/api/v1/login', { api_key: GYMMASTER_API_KEY, memberid: m.id });
         const token = login?.result?.token;
         if (!token) continue;
+        let leadSource = null;
+        try { const prof = await gmGet(`/portal/api/v1/member/profile?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); const pr = prof?.result || prof || {}; leadSource = pr.sourcepromotion || pr.source || null; } catch (e) {}
         const pastResp = await gmGet(`/portal/api/v2/member/bookings/past?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
         const past = pastResp.result || [];
         const msResp = await gmGet(`/portal/api/v1/member/memberships?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
@@ -215,14 +217,14 @@ export default async () => {
         const rows = [];
         for (const b of past) {
           const type = b.type || ''; const bname = b.name || '';
-          const isSales = /discovery|sales|consult/i.test(`${type} ${bname}`);
+          const isSales = /discovery|sales\s*(call|meeting)/i.test(`${type} ${bname}`) && !/physio/i.test(`${type} ${bname}`);
           if (!/^\s*PT\b/i.test(type) && !isSales) continue; // pods & squads come from schedule
           if (!b.day || new Date(b.day) < cutoff) continue;
           const { kind, billable_minutes } = isSales ? { kind: 'sales', billable_minutes: classify(type).billable_minutes || 30 } : classify(type);
           rows.push({
             gm_booking_id: b.id, gm_member_id: m.id,
             client_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
-            trainer_name: parseTrainer(type) || parseTrainer(b.name),
+            trainer_name: parseTrainer(type) || parseTrainer(b.name) || coachFromResource(b.name) || coachFromResource(type),
             trainer_full: b.name || b.location || null,
             service_type: type, session_kind: kind, billable_minutes,
             session_date: b.day, start_time: b.start_str || b.starttime || null,
@@ -236,7 +238,7 @@ export default async () => {
           email: m.email, status: m.status,
           membership: active ? active.name : null,
           coach_weeks: cz ? cz.weeks : null, coach_minutes: cz ? cz.minutes : null, coach_count: cz ? cz.count : null,
-          lead_source: m.sourcepromotion || m.source || m.leadsource || null,
+          lead_source: leadSource || m.sourcepromotion || null,
           last_synced: new Date().toISOString(),
         }], 'gm_member_id');
         if (rows.length) { await sbUpsert('sessions', rows, 'gm_booking_id'); upserted += rows.length; }
