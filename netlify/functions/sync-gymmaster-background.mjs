@@ -220,11 +220,18 @@ export default async () => {
         if (pifM) { const mm = String(pifM.name || '').match(/\$([\d,]+(?:\.\d+)?)/); signupCash = mm ? mm[1].replace(/,/g, '') : (pifM.price != null ? String(pifM.price).replace(/[^0-9.]/g, '') : null); }
         const rows = [];
         for (const b of past) {
-          const type = b.type || ''; const bname = b.name || '';
-          const isSales = /discovery|sales\s*(call|meeting)/i.test(`${type} ${bname}`) && !/physio/i.test(`${type} ${bname}`);
-          if (!/^\s*PT\b/i.test(type) && !isSales) continue; // pods & squads come from schedule
+          const type = b.type || ''; const bname = b.name || ''; const blob = `${type} ${bname}`;
+          const isSales = /discovery|sales\s*(call|meeting)/i.test(blob) && !/physio/i.test(blob);
+          const isPT = /^\s*PT\b/i.test(type);
+          // 1-on-1 coaching sessions are booked as "<Trainer> Coaching Session" (e.g. Laura),
+          // not "PT ..." — capture them too, as billable individual sessions.
+          const isCoaching = /coaching\s*session/i.test(blob) && !/squad|\bpod/i.test(blob);
+          if (!isPT && !isCoaching && !isSales) continue; // pods & squads come from schedule
           if (!b.day || new Date(b.day) < cutoff) continue;
-          const { kind, billable_minutes } = isSales ? { kind: 'sales', billable_minutes: classify(type).billable_minutes || 30 } : classify(type);
+          let kind, billable_minutes;
+          if (isSales) { kind = 'sales'; billable_minutes = classify(type).billable_minutes || 30; }
+          else if (isCoaching) { kind = 'individual'; const mm = blob.match(/(\d+)\s*min/i); billable_minutes = mm ? Number(mm[1]) : (classify(type).billable_minutes || 30); }
+          else { ({ kind, billable_minutes } = classify(type)); }
           rows.push({
             gm_booking_id: b.id, gm_member_id: m.id,
             client_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
