@@ -84,7 +84,7 @@ function getStatus(id){return STATUSES.find(s=>s.id===id)||STATUSES[1];}
 function shortenPlan(p){if(!p)return'';return p.replace(/^\s*\[\d{4}\]\s*/,'').replace(/\s*-\s*Billed?\s*Weekly\s*$/i,'').replace(/\s+/g,' ').trim();}
 function lastKeyOf(surname){return String(surname||'').toLowerCase().replace(/['\-\s]/g,'');}
 
-let allClients=[], currentFilter='all', openDropdownIdx=null, bookingsMap={}, weekKey=getWeekKey();
+let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, COACHES={byId:{},byEmail:{}}, weekKey=getWeekKey();
 
 function findHolds(c,holds){const last=(c.surname||'').toLowerCase();const first=(c.firstName||'').toLowerCase();
   return holds.filter(h=>{if((h.last||'')!==last)return false;if(h.first&&first&&!first.includes(h.first)&&!h.first.includes(first))return false;return true;});}
@@ -104,7 +104,7 @@ function buildClients(clients,holds,thisWk,lastWk){
     else if(rh){status=(prev&&prev.status!=='paused')?prev.status:'not_due_attending';holdInfo=`Returned ${parseISO(rh.hold_end).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})} — check in`;tag='returning';}
     else{status=prev?prev.status:'not_due_attending';}
     const bk=bookingsMap[lastKeyOf(sc.surname)];
-    return{email,name:sc.name,firstName:sc.firstName,surname:sc.surname,plan:shortenPlan(sc.membership),
+    return{email,name:sc.name,firstName:sc.firstName,surname:sc.surname,coach:sc.coach||'Unassigned',plan:shortenPlan(sc.membership),
       status,notes,holdInfo,tag,prevStatus:prev?prev.status:null,booking:bk?bk.label:null};
   });
   return out.sort((a,b)=>{
@@ -116,6 +116,11 @@ function buildClients(clients,holds,thisWk,lastWk){
 }
 
 function filtered(){
+  let base=allClients;
+  if(coachFilter!=='all')base=base.filter(c=>c.coach===coachFilter);
+  return applyTab(base);
+}
+function applyTab(allClients){
   if(currentFilter==='attention')return allClients.filter(c=>PRIORITY_IDS.includes(c.status));
   if(currentFilter==='paused')return allClients.filter(c=>c.status==='paused');
   if(currentFilter==='returning')return allClients.filter(c=>c.tag==='returning');
@@ -137,8 +142,11 @@ function renderStats(){
 }
 function renderFilters(){
   const tabs=[{id:'all',label:'All'},{id:'attention',label:'🔴 Needs attention'},{id:'paused',label:'⏸ Paused'},{id:'returning',label:'↩ Returning'},{id:'notbooked',label:'⚠️ Not booked'}];
-  return `<div class="filters">${tabs.map(t=>`<button class="filter-btn${currentFilter===t.id?' active':''}" onclick="setFilter('${t.id}')">${t.label}</button>`).join('')}</div>`;
+  const coaches=[...new Set(allClients.map(c=>c.coach))].sort((a,b)=>a==='Unassigned'?1:b==='Unassigned'?-1:a.localeCompare(b));
+  const sel=`<select class="filter-btn" style="font-weight:600" onchange="setCoach(this.value)"><option value="all"${coachFilter==='all'?' selected':''}>👤 All coaches</option>${coaches.map(c=>`<option value="${esc(c)}"${coachFilter===c?' selected':''}>${esc(c)} (${allClients.filter(x=>x.coach===c).length})</option>`).join('')}</select>`;
+  return `<div class="filters">${sel}${tabs.map(t=>`<button class="filter-btn${currentFilter===t.id?' active':''}" onclick="setFilter('${t.id}')">${t.label}</button>`).join('')}</div>`;
 }
+function setCoach(v){coachFilter=v;render();}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
 function renderCard(c,idx){
   const st=getStatus(c.status);
@@ -153,6 +161,7 @@ function renderCard(c,idx){
         ${c.tag==='hold'?'<span class="badge badge-hold">On Hold</span>':''}
       </div>
       <div class="client-meta">
+        <span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-weight:600">👤 ${esc(c.coach)}</span>
         ${c.plan?`<span>📋 ${esc(c.plan)}</span>`:''}
         ${c.booking?`<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-weight:600">✅ Booked — ${esc(c.booking)}</span>`:`<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:10px;font-weight:600">⚠️ Not booked</span>`}
         ${prevLabel?`<span class="muted">Last week: ${esc(prevLabel)}</span>`:''}
@@ -218,16 +227,18 @@ async function boot(){
   ME=sess.session.user?.email||'';
   weekKey=getWeekKey();
   try{
-    const [clientsRes,bookRes,holdRes,thisRes,lastRes]=await Promise.all([
-      sb.from('clients').select('full_name,first_name,surname,email,membership,coach_count,status').not('coach_count','is',null),
+    const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes]=await Promise.all([
+      sb.from('clients').select('full_name,first_name,surname,email,membership,coach_count,gm_member_id,status').not('coach_count','is',null),
       sb.from('invoices').select('raw_text').eq('source','pt-bookings').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('invoices').select('raw_text').eq('source','holds-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',weekKey),
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',lastWeekKey()),
+      sb.from('invoices').select('raw_text').eq('source','client-coaches').order('created_at',{ascending:false}).limit(1).maybeSingle(),
     ]);
+    COACHES=(()=>{try{const d=JSON.parse(coachRes.data.raw_text);return{byId:d.byId||{},byEmail:d.byEmail||{}};}catch(e){return{byId:{},byEmail:{}};}})();
     const clients=(clientsRes.data||[])
       .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||''))
-      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||''}));
+      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',coach:COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
     bookingsMap=(()=>{try{return JSON.parse(bookRes.data.raw_text).bookings||{};}catch(e){return{};}})();
     const holds=(()=>{try{return JSON.parse(holdRes.data.raw_text).holds||[];}catch(e){return[];}})();
     const toMap=rows=>{const m={};for(const r of (rows||[]))m[(r.client_email||'').toLowerCase()]={status:r.status,notes:r.notes};return m;};
