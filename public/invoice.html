@@ -138,11 +138,12 @@ function weeksBetween(from,to){const d=(new Date(to)-new Date(from))/86400000+1;
 
 // ── Generate a downloadable invoice spreadsheet in the trainer's template layout ──
 function fmtName(n){const p=String(n||'').trim().split(/\s+/);if(p.length<2)return n||'';return p[p.length-1]+', '+p.slice(0,-1).join(' ');}
-function buildInvoiceAOA(S, trainer, from, to, rate, gstable){
+function buildInvoiceAOA(S, trainer, from, to, rate, gstable, excludedSigs){
   const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
   const grp=s=>{ if(s.session_kind==='squad')return 'sqd'; if(s.session_kind==='pod')return 'pod'; if(s.session_kind==='sales')return 'sales';
     if(['individual','onboard','couple'].includes(s.session_kind)){const m=Number(s.billable_minutes||0);if(m<=30)return 'm30';if(m<=45)return 'm45';return 'm60';} return null; };
-  const rows=dedupe(S).filter(s=>{const g=grp(s);if(!g)return false;return ['m30','m45','m60'].includes(g)?s.attended:true;});
+  const sigOf=s=>`${s.session_date}|${s.start_time||''}|${s.session_kind}|${s.client_name||''}`;
+  const rows=dedupe(S).filter(s=>{const g=grp(s);if(!g)return false;if(excludedSigs&&excludedSigs.has(sigOf(s)))return false;return ['m30','m45','m60'].includes(g)?s.attended:true;});
   const byDay={}; for(const s of rows){(byDay[s.session_date]=byDay[s.session_date]||[]).push(s);}
   const COL={m30:1,m45:3,m60:5,sqd:7,pod:9,sales:12};
   const aoa=[];
@@ -170,11 +171,16 @@ function buildInvoiceAOA(S, trainer, from, to, rate, gstable){
 }
 function downloadInvoiceSheet(){
   const e=STATE.expected; if(!e||!e._sessions){alert('Click “Generate expected” first.');return;}
-  const {aoa}=buildInvoiceAOA(e._sessions, e.trainer, e.from, e.to, e.rate, e.gstable);
+  const ex=new Set(); (e._excluded||new Set()).forEach(i=>{ if(e._billRows&&e._billRows[i]) ex.add(e._billRows[i].sig); });
+  const {aoa}=buildInvoiceAOA(e._sessions, e.trainer, e.from, e.to, e.rate, e.gstable, ex);
   const ws=XLSX.utils.aoa_to_sheet(aoa); const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Invoice');
   XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
 }
+function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad'}[g]||g;}
+function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate};return v[r.group]||0;}
+function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el.checked:!e._excluded.has(i);if(billed)e._excluded.delete(i);else e._excluded.add(i);if(el){if(el.checked)el.setAttribute('checked','checked');else el.removeAttribute('checked');}recomputeInvoice();}
+function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const grand=e.gstable?sum*(1+GST):sum;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
 
 async function genExpected(){
   const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
@@ -197,10 +203,17 @@ async function genExpected(){
   const perClient={};
   oneRows.forEach(s=>{const k=s.client_name||'—';(perClient[k]??={slots:new Set(),att:0,amt:0});perClient[k].slots.add(s.session_date+'|'+(s.start_time||''));if(s.attended){perClient[k].att++;perClient[k].amt+=(Number(s.billable_minutes||0)/60)*rate;}});
   const pcRows=Object.entries(perClient).map(([n,v])=>({n,booked:v.slots.size,att:v.att,amt:v.amt})).sort((a,b)=>b.booked-a.booked);
-  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S};
+  const sigOf=s=>`${s.session_date}|${s.start_time||''}|${s.session_kind}|${s.client_name||''}`;
+  const durG=s=>{const m=Number(s.billable_minutes||0);return m<=30?'m30':m<=45?'m45':'m60';};
+  const billRows=[
+    ...oneAttDed.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:s.client_name||'—',group:durG(s),mins:Number(s.billable_minutes||0),sig:sigOf(s)})),
+    ...pods.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Pod',group:'pod',mins:Number(s.billable_minutes||60),sig:sigOf(s)})),
+    ...squads.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Squad',group:'sqd',mins:60,sig:sigOf(s)})),
+  ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+  STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
-     <div class="card"><div class="k">Expected total</div><div class="v">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
+     <div class="card"><div class="k">Expected total</div><div class="v" id="expTotal">${money(grand)}</div><div class="sub">${gstable?'incl GST · ':''}${trainer} · ${wks} wk${wks>1?'s':''} @ ${money(rate)}/hr</div></div>
      <div class="card"><div class="k">1-on-1 checked in</div><div class="v">${oneAttDed.length}</div><div class="sub">of ${oneAllDed.length} booked</div></div>
      <div class="card"><div class="k">Squads</div><div class="v">${squads.length}</div></div>
      <div class="card"><div class="k">Admin cap</div><div class="v">${adminHrs}h</div><div class="sub">${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk</div></div>
@@ -215,10 +228,11 @@ async function genExpected(){
      ${gstable?`<div class="line"><span class="lbl">GST 15%</span><span class="amt">${money(gstAmt)}</span></div>`:''}
      <div class="tot"><span>Expected total${gstable?' (incl GST)':''}</span><span>${money(grand)}</span></div>
    </div>
-   <div class="panel" style="overflow-x:auto"><h3>1-on-1 breakdown by client</h3>
-     <table><thead><tr><th>Client</th><th class="num">Booked</th><th class="num">Checked in</th><th class="num">Billable</th></tr></thead>
-     <tbody>${pcRows.map(r=>`<tr><td>${r.n}</td><td class="num">${r.booked}</td><td class="num" style="${r.att<r.booked?'color:#b91c1c;font-weight:700':''}">${r.att}</td><td class="num">${money(r.amt)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No 1-on-1 sessions in this period.</td></tr>'}</tbody></table>
-     <p class="small" style="margin-top:6px">Pods/squads aren't client-specific so aren't listed here. Red "Checked in" = sessions booked but not marked attended (potential over-billing to query).</p>
+   <div class="panel" style="overflow-x:auto"><h3>Session list — untick anyone you\'re not billing</h3>
+     <table><thead><tr><th>Bill?</th><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th class="num">$</th></tr></thead>
+     <tbody>${billRows.map((r,i)=>`<tr><td style="text-align:center"><input type="checkbox" checked onchange="toggleBill(${i},this)"></td><td>${r.date}</td><td>${r.time}</td><td>${r.client}</td><td>${labelOf(r.group)}</td><td class="num">${money(rowAmtG(r,rate))}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No billable sessions in this period.</td></tr>'}</tbody></table>
+     <div class="tot"><span><span id="billCount">${billRows.length}</span> sessions billed${gstable?' (total incl GST)':''}</span><span id="liveTotal">${money(grand)}</span></div>
+     <p class="small" style="margin-top:6px">Untick a session you saw but won\'t bill (e.g. a comp) — the total and the downloaded invoice both update.${admin$>0?' Admin '+money(admin$)+' is added on top.':''}</p>
    </div>`;
   STATE.outHTML=document.getElementById('out').innerHTML;
   renderCompare();
