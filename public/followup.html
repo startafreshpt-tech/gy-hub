@@ -224,6 +224,7 @@ async function boot(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){document.getElementById('app').innerHTML='<div class="loading">Setup needed.</div>';return;}
   const {data:sess}=await sb.auth.getSession();
   if(!sess.session){location.replace('index.html');return;}
+  if(!(await window.cwGuard(sb,'followup.html'))) return;
   ME=sess.session.user?.email||'';
   weekKey=getWeekKey();
   try{

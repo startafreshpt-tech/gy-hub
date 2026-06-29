@@ -10,6 +10,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
     const sb=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY);
     const {data:sess}=await sb.auth.getSession();
     if(!sess.session){location.replace('index.html');return;}
+    if(!(await window.cwGuard(sb,'milestones.html'))) return;
     const {data,error}=await sb.from('invoices').select('raw_text,created_at').eq('source','milestones-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle();
     const gate=document.getElementById('gate');
     if(error||!data||!data.raw_text){ if(gate)gate.remove(); document.body.innerHTML='<div style="max-width:680px;margin:60px auto;font-family:sans-serif;color:#475569;padding:0 20px"><a href=index.html style=color:#1a3a2a>\u2039 Hub</a><h2>Milestones data is being prepared</h2><p>The weekly Trainerize refresh hasn\u2019t completed yet \u2014 check back shortly.</p></div>'; return; }

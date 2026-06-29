@@ -57,17 +57,35 @@ export default async () => {
   if (!SB_URL || !SB_KEY) return new Response(JSON.stringify({ ok: false, error: 'missing env' }), { status: 500 });
   try {
     const sessions = await fetchAllSessions();
-    const byId = dominantCoachByMember(sessions);
-    // also key by email via the clients table
-    const cr = await fetch(`${SB_URL}/rest/v1/clients?select=gm_member_id,email`, { headers: H() });
+    const gmById = dominantCoachByMember(sessions);   // GymMaster session-derived (fallback)
+
+    // Trainerize assignment overrides (the source of truth), if provided.
+    let ov = { byEmail: {}, byName: {} };
+    try {
+      const or = await fetch(`${SB_URL}/rest/v1/invoices?select=raw_text&source=eq.coach-overrides&order=created_at.desc&limit=1`, { headers: H() });
+      const oj = await or.json();
+      if (Array.isArray(oj) && oj[0]) { const d = JSON.parse(oj[0].raw_text); ov.byEmail = d.byEmail || {}; ov.byName = d.byName || {}; }
+    } catch (e) { /* no overrides yet */ }
+    const normName = n => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+    const cr = await fetch(`${SB_URL}/rest/v1/clients?select=gm_member_id,email,full_name`, { headers: H() });
     const clients = await cr.json();
-    const byEmail = {};
+    const byId = {}, byEmail = {};
+    let overridden = 0, fromGm = 0;
     for (const c of (Array.isArray(clients) ? clients : [])) {
-      const coach = byId[String(c.gm_member_id)];
-      if (coach && c.email) byEmail[String(c.email).toLowerCase()] = coach;
+      const em = String(c.email || '').toLowerCase();
+      const nm = normName(c.full_name);
+      // Trainerize override wins; else GymMaster session coach; else nothing.
+      let coach = ov.byEmail[em] || ov.byName[nm] || null;
+      if (coach) overridden++;
+      if (!coach) { coach = gmById[String(c.gm_member_id)] || null; if (coach) fromGm++; }
+      if (coach) {
+        byId[String(c.gm_member_id)] = coach;
+        if (em) byEmail[em] = coach;
+      }
     }
-    await sbWriteBlob('client-coaches', JSON.stringify({ updated: new Date().toISOString(), byId, byEmail }));
-    return new Response(JSON.stringify({ ok: true, clients: Object.keys(byId).length }), { headers: { 'content-type': 'application/json' } });
+    await sbWriteBlob('client-coaches', JSON.stringify({ updated: new Date().toISOString(), byId, byEmail, source: { trainerize: overridden, gymmaster: fromGm } }));
+    return new Response(JSON.stringify({ ok: true, trainerize: overridden, gymmaster: fromGm, total: Object.keys(byId).length }), { headers: { 'content-type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500 });
   }

@@ -186,3 +186,19 @@ alter table followup_status enable row level security;
 -- Authenticated hub users (Gavyn, Alex) can read and write follow-up statuses.
 create policy "auth read followup"  on followup_status for select to authenticated using (true);
 create policy "auth write followup" on followup_status for all    to authenticated using (true) with check (true);
+
+-- ============================================================================
+-- Role-based access for the hub. role 'full' (default) sees every tool;
+-- role 'limited' sees only the page filenames listed in tools[].
+-- e.g. Scott: role='limited', tools='{milestones.html,followup.html}'
+-- ============================================================================
+create table if not exists app_roles (
+  email      text primary key,
+  role       text not null default 'full',
+  tools      text[] default null,
+  updated_at timestamptz default now()
+);
+alter table app_roles enable row level security;
+-- Each signed-in user may read only their own role row.
+create policy "read own role" on app_roles for select to authenticated
+  using (lower(email) = lower(auth.jwt() ->> 'email'));

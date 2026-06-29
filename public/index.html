@@ -55,6 +55,7 @@ async function init(){
 async function render(){
   const {data}=await sb.auth.getSession();
   const user=data.session?.user;
+  if(user){ const role=await window.cwRole(sb); window.__ROLE__=role; }
   if(!user){
     $('#root').innerHTML=`<div class="auth"><h2>🌿 Growing Younger Hub</h2><p>Sign in to access your tools.</p>
       <div class="field"><label>Email</label><input id="email" type="email"></div>
@@ -67,7 +68,7 @@ async function render(){
       <div class="right"><span class="who">${user.email}</span><button onclick="signOut()">Sign out</button></div></div>
     <div class="wrap">
       <div class="lead">Choose a tool. You're signed in once for everything.</div>
-      <div class="tiles">${TOOLS.map(x=>`
+      <div class="tiles">${TOOLS.filter(x=>window.cwAllowed(window.__ROLE__,x.href)).map(x=>`
         <a class="tile ${x.live?'':'soon'}" href="${x.live?x.href:'#'}">
           <div class="ic">${x.ic}</div><div class="t">${x.t}</div><div class="d">${x.d}</div>
           <span class="badge ${x.live?'live':'soon'}">${x.live?'Open':'Coming soon'}</span>
