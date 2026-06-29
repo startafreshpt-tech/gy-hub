@@ -25,3 +25,13 @@ jobs:
           GYMMASTER_API_KEY:         ${{ secrets.GYMMASTER_API_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TRAINERIZE_API_TOKEN:      ${{ secrets.TRAINERIZE_API_TOKEN }}
+      - name: Studio Pulse churn intelligence
+        run: node scripts/studio-pulse.mjs
+        env:
+          GM_API_KEY:                ${{ secrets.GYMMASTER_API_KEY }}
+          GM_BASE:                   'https://growingyounger.gymmasteronline.com'
+          TZ_EMAIL:                  ${{ secrets.TZ_EMAIL }}
+          TZ_PASSWORD:               ${{ secrets.TZ_PASSWORD }}
+          TZ_BASE_URL:               'https://startafreshpt.beta.trainerize.com'
+          SUPABASE_URL:              'https://eqevyohstkwqslloqsni.supabase.co'
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

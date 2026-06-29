@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Studio Pulse — Churn Intelligence</title>
+<style>
+:root{color-scheme:light}*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f4f1;color:#1e293b;visibility:hidden}
+.header{background:#1a3a2a;color:#fff;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.header h1{font-size:16px;font-weight:700}
+.header a,.header .sub{color:#fff;font-size:12px;opacity:.85;text-decoration:none}
+.wrap{max-width:1150px;margin:0 auto;padding:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.kpi{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:13px}
+.kpi .v{font-size:23px;font-weight:780;letter-spacing:-.02em}
+.kpi .l{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.03em;margin-top:3px}
+.kpi .x{font-size:11px;color:#94a3b8;margin-top:3px}
+.panel{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:16px;overflow-x:auto}
+.panel h3{font-size:14px;margin-bottom:10px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.row2{grid-template-columns:1fr}}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.search{flex:1;min-width:180px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 9px;border-bottom:1px solid #eef0f4;white-space:nowrap}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;cursor:pointer;user-select:none;position:sticky;top:0;background:#fff}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:#fafbff}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+.t-high{background:#fee2e2;color:#b91c1c}.t-medium{background:#fef3c7;color:#92400e}.t-low{background:#dcfce7;color:#166534}
+.sig{font-size:11px;color:#64748b}
+.muted{color:#94a3b8}.small{font-size:12px;color:#64748b}
+.loading{display:flex;flex-direction:column;align-items:center;padding:60px 20px;color:#64748b}
+.spinner{width:26px;height:26px;border:3px solid #e2e8f0;border-top-color:#1a3a2a;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app"><div class="loading"><div class="spinner"></div>Loading…</div></div>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const cfg=window.APP_CONFIG||{};
+const sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY);
+const $=s=>document.querySelector(s);
+const money=n=>'$'+Math.round(Number(n||0)).toLocaleString();
+const fmt=n=>Number(n||0).toLocaleString();
+let D=null, SORT={k:'risk_score',dir:-1}, Q='';
+
+async function boot(){
+  document.body.style.visibility='visible';
+  if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#app').innerHTML='<div class="loading">Setup needed.</div>';return;}
+  const {data:sess}=await sb.auth.getSession();
+  if(!sess.session){location.replace('index.html');return;}
+  const {data,error}=await sb.from('invoices').select('raw_text,created_at').eq('source','studio-pulse-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle();
+  if(error||!data||!data.raw_text){$('#app').innerHTML='<div class="header"><a href="index.html">‹ Hub</a></div><div class="loading">Churn data is being prepared — the weekly sync hasn’t produced a snapshot yet. Check back shortly.</div>';return;}
+  try{ D=JSON.parse(data.raw_text); }catch(e){ $('#app').innerHTML='<div class="loading" style="color:#b91c1c">Could not read churn data.</div>'; return; }
+  render();
+}
+function tierPill(t){return `<span class="pill t-${t}">${t}</span>`;}
+function tzCell(c){ if(!c.on_trainerize) return '<span class="muted">not linked</span>';
+  const ll=c.trainerize_last_login_days; const w=c.trainerize_workouts_per_week;
+  return `${ll==null?'—':ll+'d ago'} · ${w==null?'—':w+'/wk'}`; }
+function rows(){
+  let r=(D.clients||[]).slice();
+  if(Q){const q=Q.toLowerCase(); r=r.filter(c=>(c.name||'').toLowerCase().includes(q));}
+  r.sort((a,b)=>{const k=SORT.k;let x=a[k],y=b[k];if(typeof x==='string'){x=(x||'').toLowerCase();y=(y||'').toLowerCase();return x<y?-SORT.dir:x>y?SORT.dir:0;}return ((x||0)-(y||0))*SORT.dir;});
+  return r;
+}
+function render(){
+  const s=D.summary||{}, rev=D.revenue_at_risk||{}, ph=D.payment_history_summary||{};
+  const totalLTV=(D.clients||[]).reduce((a,c)=>a+(c.ltv||0),0);
+  const tzPct=s.trainerize_connected!=null?s.trainerize_connected:Math.round(100*(D.clients||[]).filter(c=>c.on_trainerize).length/Math.max(1,(D.clients||[]).length));
+  $('#app').innerHTML=`
+  <div class="header"><h1>📉 Studio Pulse — Churn Intelligence</h1>
+    <div><a href="index.html">‹ Hub</a> &nbsp; <span class="sub">updated ${(D.trainerize_last_refresh||D.updated||'').slice(0,10)}</span> &nbsp; <a href="#" onclick="signOut();return false">Sign out</a></div></div>
+  <div class="wrap">
+    <div class="kpis">
+      <div class="kpi"><div class="v">${fmt(s.active_members)}</div><div class="l">Active members</div></div>
+      <div class="kpi"><div class="v" style="color:#b91c1c">${fmt(s.high_risk_count)}</div><div class="l">High risk</div><div class="x">${fmt(s.medium_risk_count)} medium</div></div>
+      <div class="kpi"><div class="v">${money(rev.monthly)}</div><div class="l">Revenue at risk / mo</div><div class="x">${money(rev.annual)}/yr</div></div>
+      <div class="kpi"><div class="v">${money(totalLTV)}</div><div class="l">Total lifetime value</div></div>
+      <div class="kpi"><div class="v">${tzPct}%</div><div class="l">Trainerize-linked</div></div>
+      <div class="kpi"><div class="v">${s.retention_rate!=null?s.retention_rate+'%':'—'}</div><div class="l">Retention rate</div><div class="x">avg risk ${s.avg_risk_score??'—'}</div></div>
+    </div>
+
+    <div class="panel">
+      <h3>Member risk register</h3>
+      <div class="controls"><input class="search" id="q" placeholder="Search members…" oninput="Q=this.value;paintRows()"></div>
+      <table><thead><tr>
+        ${[['name','Member'],['risk_score','Risk'],['payment_status','Payment'],['tenure_months','Tenure'],['ltv','LTV'],['days_to_renewal','Renewal'],['trainerize_last_login_days','Trainerize']].map(([k,l])=>`<th class="${['risk_score','ltv','tenure_months','days_to_renewal'].includes(k)?'num':''}" onclick="sortBy('${k}')">${l}</th>`).join('')}
+        <th>Signals</th>
+      </tr></thead><tbody id="rows"></tbody></table>
+    </div>
+
+    <div class="row2">
+      <div class="panel"><h3>Payment-failure tracker</h3>
+        <div class="kpis" style="margin:0">
+          <div class="kpi"><div class="v">${fmt(ph.chronic_3plus)}</div><div class="l">3+ misses</div></div>
+          <div class="kpi"><div class="v">${fmt(ph.chronic_6plus)}</div><div class="l">6+ misses</div></div>
+          <div class="kpi"><div class="v" style="color:#b91c1c">${fmt(ph.chronic_10plus)}</div><div class="l">10+ misses</div></div>
+        </div>
+        <p class="small" style="margin-top:8px">Members tracked: ${fmt(ph.members_tracked)}.</p>
+      </div>
+      <div class="panel"><h3>Trainerize deactivation needed (${(D.trainerize_deactivation_alerts||[]).length})</h3>
+        <p class="small" style="margin-bottom:8px">Cancelled at the gym but still have a live Trainerize account — remove these.</p>
+        <table><thead><tr><th>Name</th><th>Last login</th></tr></thead>
+        <tbody>${(D.trainerize_deactivation_alerts||[]).map(a=>`<tr><td>${a.name}</td><td class="small">${(a.last_login||'—').slice(0,10)}</td></tr>`).join('')||'<tr><td colspan=2 class=muted>None 🎉</td></tr>'}</tbody></table>
+      </div>
+    </div>
+
+    <p class="small">Risk score 0–10, weighted by signals that adapt as cancellations accumulate (learning: ${(D.learning&&D.learning.snapshot_events)||0} events, blend ${(D.learning&&D.learning.alpha_blend)??0}). Data: GymMaster + Trainerize, refreshed weekly.</p>
+  </div>`;
+  paintRows();
+}
+function paintRows(){
+  const tb=$('#rows'); if(!tb)return;
+  tb.innerHTML=rows().map(c=>`<tr>
+    <td>${c.name||'—'}</td>
+    <td class="num">${tierPill(c.risk_tier)} ${c.risk_score??''}</td>
+    <td class="small">${c.payment_status||'—'}${c.payment_failure_count?` (${c.payment_failure_count})`:''}</td>
+    <td class="num">${c.tenure_months!=null?c.tenure_months+'mo':'—'}</td>
+    <td class="num">${money(c.ltv)}</td>
+    <td class="num ${c.days_to_renewal!=null&&c.days_to_renewal<=14?'':'muted'}">${c.days_to_renewal!=null?c.days_to_renewal+'d':'—'}</td>
+    <td class="small">${tzCell(c)}</td>
+    <td class="sig">${(c.signals||[]).join(', ')||'—'}</td>
+  </tr>`).join('');
+}
+function sortBy(k){ if(SORT.k===k)SORT.dir*=-1; else {SORT.k=k;SORT.dir=(k==='name'?1:-1);} paintRows(); }
+async function signOut(){ await sb.auth.signOut(); location.replace('index.html'); }
+boot();
+</script>
+</body>
+</html>
