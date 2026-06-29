@@ -87,7 +87,7 @@ function getStatus(id){return STATUSES.find(s=>s.id===id)||STATUSES[1];}
 function shortenPlan(p){if(!p)return'';return p.replace(/^\s*\[\d{4}\]\s*/,'').replace(/\s*-\s*Billed?\s*Weekly\s*$/i,'').replace(/\s+/g,' ').trim();}
 function lastKeyOf(surname){return String(surname||'').toLowerCase().replace(/['\-\s]/g,'');}
 
-let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, bookingsById={}, COACHES={byId:{},byEmail:{}}, OVERRIDES={}, weekKey=getWeekKey();
+let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, bookingsById={}, COACHES={byId:{},byEmail:{}}, OVERRIDES={}, DEACT=new Set(), weekKey=getWeekKey();
 const COACH_LIST=['Gavyn','Scott','Caron','Ethan','Laura','Natalie','Kerry','Ross','Emma'];
 
 function findHolds(c,holds){const last=(c.surname||'').toLowerCase();const first=(c.firstName||'').toLowerCase();
@@ -242,7 +242,7 @@ async function boot(){
   ME=sess.session.user?.email||'';
   weekKey=getWeekKey();
   try{
-    const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes,ovRes]=await Promise.all([
+    const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes,ovRes,deactRes]=await Promise.all([
       sb.from('clients').select('full_name,first_name,surname,email,membership,gm_member_id,status'),
       sb.from('invoices').select('raw_text').eq('source','pt-bookings').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('invoices').select('raw_text').eq('source','holds-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle(),
@@ -250,11 +250,13 @@ async function boot(){
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',lastWeekKey()),
       sb.from('invoices').select('raw_text').eq('source','client-coaches').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('coach_overrides').select('gm_member_id,coach'),
+      sb.from('invoices').select('raw_text').eq('source','tz-deactivated').order('created_at',{ascending:false}).limit(1).maybeSingle(),
     ]);
     COACHES=(()=>{try{const d=JSON.parse(coachRes.data.raw_text);return{byId:d.byId||{},byEmail:d.byEmail||{}};}catch(e){return{byId:{},byEmail:{}};}})();
     OVERRIDES={}; for(const o of (ovRes.data||[])) OVERRIDES[String(o.gm_member_id)]=o.coach;
+    DEACT=(()=>{try{return new Set((JSON.parse(deactRes.data.raw_text).emails)||[]);}catch(e){return new Set();}})();
     const clients=(clientsRes.data||[])
-      .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||''))
+      .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||'')&&!DEACT.has((c.email||'').toLowerCase()))
       .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',memberId:c.gm_member_id,coach:OVERRIDES[String(c.gm_member_id)]||COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
     (()=>{try{const d=JSON.parse(bookRes.data.raw_text);bookingsMap=d.bookings||{};bookingsById=d.byId||{};}catch(e){bookingsMap={};bookingsById={};}})();
     const holds=(()=>{try{return JSON.parse(holdRes.data.raw_text).holds||[];}catch(e){return[];}})();
