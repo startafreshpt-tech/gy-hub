@@ -131,6 +131,8 @@ async function viewCheck(){
      </div>
      <div id="cmp"></div>
    </div>`;
+  if(STATE.outHTML) document.getElementById('out').innerHTML=STATE.outHTML;
+  if(STATE.actual) renderCompare();
 }
 function weeksBetween(from,to){const d=(new Date(to)-new Date(from))/86400000+1;return Math.max(1,Math.round(d/7));}
 
@@ -178,6 +180,7 @@ async function genExpected(){
      <tbody>${pcRows.map(r=>`<tr><td>${r.n}</td><td class="num">${r.booked}</td><td class="num" style="${r.att<r.booked?'color:#b91c1c;font-weight:700':''}">${r.att}</td><td class="num">${money(r.amt)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No 1-on-1 sessions in this period.</td></tr>'}</tbody></table>
      <p class="small" style="margin-top:6px">Pods/squads aren't client-specific so aren't listed here. Red "Checked in" = sessions booked but not marked attended (potential over-billing to query).</p>
    </div>`;
+  STATE.outHTML=document.getElementById('out').innerHTML;
   renderCompare();
 }
 

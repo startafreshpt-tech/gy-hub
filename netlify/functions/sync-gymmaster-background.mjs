@@ -153,6 +153,7 @@ export default async () => {
   const coachVotes = {};            // memberId -> { TrainerName: count, _email }
   const nextBooking = {};           // surnameKey -> { label, date }
   const nextBookingById = {};        // memberId -> { label, date }
+  let dbgClass = 0, dbgService = 0, dbgSample = null;
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   try {
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(SYNC_LOOKBACK_DAYS));
@@ -173,14 +174,20 @@ export default async () => {
         collectHolds(holdsOut, m, ms);
         // Upcoming bookings (all trainers) — for next-appointment dates.
         let upcoming = [];
-        try { const upResp = await gmGet(`/portal/api/v2/member/bookings?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); upcoming = upResp.servicebookings || []; } catch (e) { upcoming = []; }
+        try {
+          const upResp = await gmGet(`/portal/api/v2/member/bookings?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
+          const cb = upResp.classbookings || [], sv = upResp.servicebookings || [];
+          dbgClass += cb.length; dbgService += sv.length;
+          if (!dbgSample && (cb.length || sv.length)) dbgSample = cb[0] || sv[0];
+          upcoming = [...cb, ...sv];   // PT/coaching are class-type bookings (trainer in staffname)
+        } catch (e) { upcoming = []; }
         // Coach assignment: read the trainer out of the booking resource for every
         // 1-on-1 coaching / PT booking (this is where "Laura Coaching Session" lives).
         for (const b of [...past, ...upcoming]) {
-          const blob = `${b.name || ''} ${b.type || ''}`;
+          const blob = `${b.name || ''} ${b.type || ''} ${b.staffname || ''} ${b.location || ''}`;
           if (/squad|\bpod/i.test(blob)) continue;
           if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
-          const tr = coachFromResource(b.name) || parseTrainer(b.type) || coachFromResource(b.type);
+          const tr = coachFromResource(b.name) || coachFromResource(b.staffname) || parseTrainer(b.type) || coachFromResource(b.type) || coachFromResource(b.location);
           if (!tr) continue;
           const v = (coachVotes[m.id] = coachVotes[m.id] || { _email: m.email });
           v[tr] = (v[tr] || 0) + 1;
@@ -188,7 +195,7 @@ export default async () => {
         // Next upcoming 1-on-1 appointment (any trainer).
         let nb = null;
         for (const b of upcoming) {
-          const blob = `${b.name || ''} ${b.type || ''}`;
+          const blob = `${b.name || ''} ${b.type || ''} ${b.staffname || ''}`;
           if (/squad|\bpod/i.test(blob)) continue;
           if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
           if (!b.day) continue;
@@ -266,6 +273,7 @@ export default async () => {
     }
     if (Object.keys(coachById).length) await sbWriteBlob('member-coaches', JSON.stringify({ updated: new Date().toISOString(), byId: coachById, byEmail: coachByEmail }));
     if (Object.keys(nextBooking).length) await sbWriteBlob('pt-bookings', JSON.stringify({ updated: new Date().toISOString(), bookings: nextBooking, byId: nextBookingById }));
+    await sbWriteBlob('debug-bookings', JSON.stringify({ updated: new Date().toISOString(), classbookings_seen: dbgClass, servicebookings_seen: dbgService, next_found: Object.keys(nextBooking).length, sample: dbgSample }));
     await sbPatch('sync_log', `id=eq.${logId}`, {
       finished_at: new Date().toISOString(), members_scanned: scanned,
       sessions_upserted: upserted, status: 'ok',
