@@ -782,8 +782,10 @@ function daysSince(dateStr, today) {
   if (!s || ['not yet', '-', ''].includes(s.toLowerCase())) return null;
   if (/hour|minute|second/i.test(s)) return 0;
   if (s.toLowerCase() === 'yesterday') return 1;
-  // See KNOWN ISSUE #1 at the top of this file: "Today" is intentionally NOT
-  // special-cased here, matching the Python source's quirk exactly.
+  if (s.toLowerCase() === 'today') return 0;   // FIX: members who signed in
+  // today were wrongly returning null here (Python-quirk port), which fired
+  // the tz_never "Never logged into Trainerize" signal on the MOST active
+  // members. "Today" now correctly counts as 0 days since last login.
   const parsed = parseDDMonYYYY(s);
   if (!parsed) return null;
   return daysBetween(today, parsed);

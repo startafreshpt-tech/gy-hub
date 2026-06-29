@@ -34,6 +34,14 @@ tbody tr:hover{background:#fafbff}
 .loading{display:flex;flex-direction:column;align-items:center;padding:60px 20px;color:#64748b}
 .spinner{width:26px;height:26px;border:3px solid #e2e8f0;border-top-color:#1a3a2a;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:10px}
 @keyframes spin{to{transform:rotate(360deg)}}
+.legend summary{cursor:pointer;list-style:none}
+.legend summary::-webkit-details-marker{display:none}
+.legend summary::before{content:"\25B8";margin-right:8px;color:#94a3b8}
+.legend[open] summary::before{content:"\25BE"}
+.tierrow{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:8px 0}
+.legendtbl{width:100%;border-collapse:collapse}
+.legendtbl td{padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.legendtbl td.num{font-weight:700;color:#b91c1c;text-align:right;width:48px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -84,6 +92,30 @@ function render(){
       <div class="kpi"><div class="v">${tzPct}%</div><div class="l">Trainerize-linked</div></div>
       <div class="kpi"><div class="v">${s.retention_rate!=null?s.retention_rate+'%':'—'}</div><div class="l">Retention rate</div><div class="x">avg risk ${s.avg_risk_score??'—'}</div></div>
     </div>
+
+    <details class="panel legend" id="legend">
+      <summary><b>How to read these risk scores</b> <span class="muted">— click to expand</span></summary>
+      <p class="small" style="margin:10px 0 4px">Every active member gets a <b>risk score from 0–10</b>. Points are added for each warning sign below, then the member is bucketed into a tier:</p>
+      <div class="tierrow">
+        <span class="pill t-high">high</span> <span class="small">score 7+ — act this week</span>
+        &nbsp;&nbsp; <span class="pill t-medium">medium</span> <span class="small">score 4–6.9 — keep an eye on</span>
+        &nbsp;&nbsp; <span class="pill t-low">low</span> <span class="small">score under 4 — healthy</span>
+      </div>
+      <p class="small" style="margin:14px 0 4px"><b>What adds points (the Signals column):</b></p>
+      <table class="legendtbl"><tbody>
+        <tr><td>Payment failed / billing overdue</td><td class="num">+2.5</td><td class="small">A payment bounced, or they're behind on billing</td></tr>
+        <tr><td>Never logged into Trainerize</td><td class="num">+2.0</td><td class="small">No recorded app/web sign-in at all</td></tr>
+        <tr><td>No Trainerize login 10+ days</td><td class="num">+1.5</td><td class="small">Gone quiet on the app</td></tr>
+        <tr><td>10+ lifetime payment misses</td><td class="num">+1.5</td><td class="small">Chronic billing problems over time</td></tr>
+        <tr><td>Zero workouts logged</td><td class="num">+1.0</td><td class="small">Not training — the strongest churn signal we found</td></tr>
+        <tr><td>6–9 lifetime payment misses</td><td class="num">+1.0</td><td class="small">Repeated billing problems</td></tr>
+        <tr><td>Membership expiring soon</td><td class="num">+1.0</td><td class="small">Renewal due in the next 14 days</td></tr>
+        <tr><td>No Trainerize login 5–9 days</td><td class="num">+0.5</td><td class="small">Mild drop-off</td></tr>
+        <tr><td>New member (first weeks)</td><td class="num">+0.5</td><td class="small">Early members are more fragile</td></tr>
+      </tbody></table>
+      <p class="small" style="margin:12px 0 2px"><b>Trainerize column says "not linked"?</b> That member isn't a Trainerize coaching client — they're on a gym-only or class-only membership (or it's a demo/test account). Only coaching clients appear in Trainerize, so "not linked" is normal for most of the gym. The <b>Trainerize-linked</b> KPI shows how many of your members are matched.</p>
+      <p class="small" style="margin:8px 0 2px">The weights above are the starting point. As real cancellations accumulate, the model quietly re-weights whichever signals actually predicted churn for <i>your</i> studio.</p>
+    </details>
 
     <div class="panel">
       <h3>Member risk register</h3>

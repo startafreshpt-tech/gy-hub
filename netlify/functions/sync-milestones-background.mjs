@@ -86,11 +86,39 @@ async function processDeactivated(m){const uid=m.id;const name=`${m.firstName||'
   return{id:uid,name,data:true,first_kg:round1(f.bw_lb*LB2KG),last_kg:round1(last.bw_lb*LB2KG),loss_kg:round1((f.bw_lb-last.bw_lb)*LB2KG),first:firstDate,last:last.date,_habit:habit};}
 const saneWt=(f,l,loss)=>f!=null&&l!=null&&f>=35&&f<=250&&l>=35&&l<=250&&loss>0&&loss<=50;
 function pearson(xs,ys){const n=xs.length;if(n<3)return null;const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;let nu=0,dx=0,dy=0;for(let i=0;i<n;i++){nu+=(xs[i]-mx)*(ys[i]-my);dx+=(xs[i]-mx)**2;dy+=(ys[i]-my)**2;}const den=Math.sqrt(dx*dy);return den?Math.round(nu/den*100)/100:null;}
+async function loadMembershipMap(){
+  // Pull membership (plan + embedded price) per member from the clients table,
+  // which the GymMaster sync populates earlier in the same weekly run. Returns
+  // two lookups: exact full-name, and a first+last-initial fallback key.
+  const map={exact:new Map(),key:new Map()};
+  if(!SB_URL||!SB_KEY) return map;
+  try{
+    const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`};
+    const r=await fetch(`${SB_URL}/rest/v1/clients?select=full_name,membership&limit=2000`,{headers:H});
+    const rows=await r.json();
+    const mk=n=>{const p=String(n||'').trim().split(/\s+/).filter(Boolean);return p.length>=2?`${p[0].toLowerCase()}|${p[p.length-1][0].toUpperCase()}`:null;};
+    for(const c of (Array.isArray(rows)?rows:[])){
+      const nm=(c.full_name||'').trim(); const ms=c.membership||null;
+      if(!nm||!ms) continue;
+      map.exact.set(nm.toLowerCase(),ms);
+      const k=mk(nm); if(k&&!map.key.has(k)) map.key.set(k,ms);
+    }
+  }catch(e){/* leave map empty -> cards show no plan, no crash */}
+  return map;
+}
+function lookupMembership(name,map){
+  const nm=String(name||'').trim(); if(!nm) return null;
+  if(map.exact.has(nm.toLowerCase())) return map.exact.get(nm.toLowerCase());
+  const p=nm.split(/\s+/).filter(Boolean);
+  if(p.length>=2){const k=`${p[0].toLowerCase()}|${p[p.length-1][0].toUpperCase()}`;if(map.key.has(k))return map.key.get(k);}
+  return null;
+}
 async function buildDATA(){
+  const membershipMap=await loadMembershipMap();
   const activeRaw=await getActive();const active=await pool(activeRaw,processActive);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now)alltime=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);
-    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:a.wt_loss_kg,measure_age:a.measure_age,bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:null,price:null,gm_status:null};});
+    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:a.wt_loss_kg,measure_age:a.measure_age,bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
   const allLoss=[];for(const a of active){if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);allLoss.push({name:a.name,kg,first:round1(a.first_bw_lb*LB2KG),last:round1(a.bw_now_lb*LB2KG)});}}
   const losers=allLoss.filter(r=>saneWt(r.first,r.last,r.kg));
   const waist=[];for(const a of active){if(a.waist_first!=null&&a.waist_now!=null&&a.waist_first>0&&a.waist_now>0)waist.push(round1(a.waist_first-a.waist_now));}const waist_lo=waist.filter(w=>w>0);
