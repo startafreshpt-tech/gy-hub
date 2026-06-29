@@ -214,10 +214,11 @@ export default async () => {
         const cz = parseCoaching(active && active.name);
         const rows = [];
         for (const b of past) {
-          const type = b.type || '';
-          if (!/^\s*PT\b/i.test(type)) continue; // pods & squads come from schedule
+          const type = b.type || ''; const bname = b.name || '';
+          const isSales = /discovery|sales|consult/i.test(`${type} ${bname}`);
+          if (!/^\s*PT\b/i.test(type) && !isSales) continue; // pods & squads come from schedule
           if (!b.day || new Date(b.day) < cutoff) continue;
-          const { kind, billable_minutes } = classify(type);
+          const { kind, billable_minutes } = isSales ? { kind: 'sales', billable_minutes: classify(type).billable_minutes || 30 } : classify(type);
           rows.push({
             gm_booking_id: b.id, gm_member_id: m.id,
             client_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),

@@ -177,8 +177,8 @@ function downloadInvoiceSheet(){
   XLSX.utils.book_append_sheet(wb, ws, 'Invoice');
   XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
 }
-function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad'}[g]||g;}
-function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate};return v[r.group]||0;}
+function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad',sales:'Discovery'}[g]||g;}
+function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate,sales:(Number(r.mins||30)/60)*rate};return v[r.group]||0;}
 function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el.checked:!e._excluded.has(i);if(billed)e._excluded.delete(i);else e._excluded.add(i);if(el){if(el.checked)el.setAttribute('checked','checked');else el.removeAttribute('checked');}recomputeInvoice();}
 function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const grand=e.gstable?sum*(1+GST):sum;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
 
@@ -209,6 +209,7 @@ async function genExpected(){
     ...oneAttDed.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:s.client_name||'—',group:durG(s),mins:Number(s.billable_minutes||0),sig:sigOf(s)})),
     ...pods.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Pod',group:'pod',mins:Number(s.billable_minutes||60),sig:sigOf(s)})),
     ...squads.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Squad',group:'sqd',mins:60,sig:sigOf(s)})),
+    ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s)})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   STATE.expected={trainer,from,to,rate,total:grand,totalEx:total,gstAmt,gstable,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
