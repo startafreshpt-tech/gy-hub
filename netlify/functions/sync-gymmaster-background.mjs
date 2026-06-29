@@ -173,7 +173,7 @@ export default async () => {
         collectHolds(holdsOut, m, ms);
         // Upcoming bookings (all trainers) — for next-appointment dates.
         let upcoming = [];
-        try { const upResp = await gmGet(`/portal/api/v2/member/bookings/upcoming?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); upcoming = upResp.result || []; } catch (e) { upcoming = []; }
+        try { const upResp = await gmGet(`/portal/api/v2/member/bookings?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); upcoming = upResp.servicebookings || []; } catch (e) { upcoming = []; }
         // Coach assignment: read the trainer out of the booking resource for every
         // 1-on-1 coaching / PT booking (this is where "Laura Coaching Session" lives).
         for (const b of [...past, ...upcoming]) {
