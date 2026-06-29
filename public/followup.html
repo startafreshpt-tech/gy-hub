@@ -84,7 +84,7 @@ function getStatus(id){return STATUSES.find(s=>s.id===id)||STATUSES[1];}
 function shortenPlan(p){if(!p)return'';return p.replace(/^\s*\[\d{4}\]\s*/,'').replace(/\s*-\s*Billed?\s*Weekly\s*$/i,'').replace(/\s+/g,' ').trim();}
 function lastKeyOf(surname){return String(surname||'').toLowerCase().replace(/['\-\s]/g,'');}
 
-let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, COACHES={byId:{},byEmail:{}}, weekKey=getWeekKey();
+let allClients=[], currentFilter='all', coachFilter='all', openDropdownIdx=null, bookingsMap={}, bookingsById={}, COACHES={byId:{},byEmail:{}}, weekKey=getWeekKey();
 
 function findHolds(c,holds){const last=(c.surname||'').toLowerCase();const first=(c.firstName||'').toLowerCase();
   return holds.filter(h=>{if((h.last||'')!==last)return false;if(h.first&&first&&!first.includes(h.first)&&!h.first.includes(first))return false;return true;});}
@@ -103,8 +103,8 @@ function buildClients(clients,holds,thisWk,lastWk){
     else if(ah){status='paused';holdInfo=`On hold until ${parseISO(ah.hold_end).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}${ah.reason?' — '+ah.reason:''}`;tag='hold';}
     else if(rh){status=(prev&&prev.status!=='paused')?prev.status:'not_due_attending';holdInfo=`Returned ${parseISO(rh.hold_end).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})} — check in`;tag='returning';}
     else{status=prev?prev.status:'not_due_attending';}
-    const bk=bookingsMap[lastKeyOf(sc.surname)];
-    return{email,name:sc.name,firstName:sc.firstName,surname:sc.surname,coach:sc.coach||'Unassigned',plan:shortenPlan(sc.membership),
+    const bk=bookingsById[String(sc.memberId)]||bookingsMap[lastKeyOf(sc.surname)];
+    return{email,name:sc.name,firstName:sc.firstName,surname:sc.surname,memberId:sc.memberId,coach:sc.coach||'Unassigned',plan:shortenPlan(sc.membership),
       status,notes,holdInfo,tag,prevStatus:prev?prev.status:null,booking:bk?bk.label:null};
   });
   return out.sort((a,b)=>{
@@ -229,7 +229,7 @@ async function boot(){
   weekKey=getWeekKey();
   try{
     const [clientsRes,bookRes,holdRes,thisRes,lastRes,coachRes]=await Promise.all([
-      sb.from('clients').select('full_name,first_name,surname,email,membership,coach_count,gm_member_id,status').not('coach_count','is',null),
+      sb.from('clients').select('full_name,first_name,surname,email,membership,gm_member_id,status'),
       sb.from('invoices').select('raw_text').eq('source','pt-bookings').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('invoices').select('raw_text').eq('source','holds-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle(),
       sb.from('followup_status').select('client_email,status,notes').eq('week_key',weekKey),
@@ -239,8 +239,8 @@ async function boot(){
     COACHES=(()=>{try{const d=JSON.parse(coachRes.data.raw_text);return{byId:d.byId||{},byEmail:d.byEmail||{}};}catch(e){return{byId:{},byEmail:{}};}})();
     const clients=(clientsRes.data||[])
       .filter(c=>c.email&&c.email.includes('@')&&!SKIP.test(c.full_name||''))
-      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',coach:COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
-    bookingsMap=(()=>{try{return JSON.parse(bookRes.data.raw_text).bookings||{};}catch(e){return{};}})();
+      .map(c=>({name:(c.full_name||`${c.first_name||''} ${c.surname||''}`).trim(),firstName:c.first_name||'',surname:c.surname||'',email:c.email,membership:c.membership||'',memberId:c.gm_member_id,coach:COACHES.byId[String(c.gm_member_id)]||COACHES.byEmail[(c.email||'').toLowerCase()]||'Unassigned'}));
+    (()=>{try{const d=JSON.parse(bookRes.data.raw_text);bookingsMap=d.bookings||{};bookingsById=d.byId||{};}catch(e){bookingsMap={};bookingsById={};}})();
     const holds=(()=>{try{return JSON.parse(holdRes.data.raw_text).holds||[];}catch(e){return[];}})();
     const toMap=rows=>{const m={};for(const r of (rows||[]))m[(r.client_email||'').toLowerCase()]={status:r.status,notes:r.notes};return m;};
     allClients=buildClients(clients,holds,toMap(thisRes.data),toMap(lastRes.data));

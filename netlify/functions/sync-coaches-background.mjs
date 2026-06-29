@@ -66,6 +66,14 @@ export default async () => {
       const oj = await or.json();
       if (Array.isArray(oj) && oj[0]) { const d = JSON.parse(oj[0].raw_text); ov.byEmail = d.byEmail || {}; ov.byName = d.byName || {}; }
     } catch (e) { /* no overrides yet */ }
+    // Automatic GymMaster coach assignment read from booking resources
+    // ("Laura Coaching Session" etc.) — covers online coaches too.
+    let mc = { byId: {}, byEmail: {} };
+    try {
+      const mr = await fetch(`${SB_URL}/rest/v1/invoices?select=raw_text&source=eq.member-coaches&order=created_at.desc&limit=1`, { headers: H() });
+      const mj = await mr.json();
+      if (Array.isArray(mj) && mj[0]) { const d = JSON.parse(mj[0].raw_text); mc.byId = d.byId || {}; mc.byEmail = d.byEmail || {}; }
+    } catch (e) { /* none yet */ }
     const normName = n => String(n || '').toLowerCase().replace(/\s+/g, ' ').trim();
 
     const cr = await fetch(`${SB_URL}/rest/v1/clients?select=gm_member_id,email,full_name`, { headers: H() });
@@ -78,6 +86,7 @@ export default async () => {
       // Trainerize override wins; else GymMaster session coach; else nothing.
       let coach = ov.byEmail[em] || ov.byName[nm] || null;
       if (coach) overridden++;
+      if (!coach) { coach = mc.byId[String(c.gm_member_id)] || mc.byEmail[em] || null; if (coach) fromGm++; }
       if (!coach) { coach = gmById[String(c.gm_member_id)] || null; if (coach) fromGm++; }
       if (coach) {
         byId[String(c.gm_member_id)] = coach;

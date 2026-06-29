@@ -21,6 +21,15 @@ function parseTrainer(s) {
   const m = s.match(/^\s*(?:PT|PODS?)\s+([A-Za-z'’\-]+)/i);
   return m ? m[1] : null;
 }
+// Known coach first names — used to read the trainer out of a GymMaster booking
+// resource like "Laura Roukema (Laura Coaching Session 45min)" or "PT Gavyn".
+const COACH_NAMES = ['Gavyn','Scott','Caron','Ethan','Laura','Natalie','Kerry','Ross','Emma'];
+function coachFromResource(s) {
+  if (!s) return null;
+  const t = String(s).toLowerCase();
+  for (const n of COACH_NAMES) { if (new RegExp('\\b' + n.toLowerCase() + '\\b').test(t)) return n; }
+  return null;
+}
 function classify(type) {
   const t = (type || '').toLowerCase();
   let kind = 'individual';
@@ -141,6 +150,10 @@ export default async () => {
 
   let scanned = 0, upserted = 0;
   const holdsOut = [];
+  const coachVotes = {};            // memberId -> { TrainerName: count, _email }
+  const nextBooking = {};           // surnameKey -> { label, date }
+  const nextBookingById = {};        // memberId -> { label, date }
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   try {
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(SYNC_LOOKBACK_DAYS));
 
@@ -158,6 +171,36 @@ export default async () => {
         const msResp = await gmGet(`/portal/api/v1/member/memberships?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
         const ms = msResp.result || [];
         collectHolds(holdsOut, m, ms);
+        // Upcoming bookings (all trainers) — for next-appointment dates.
+        let upcoming = [];
+        try { const upResp = await gmGet(`/portal/api/v2/member/bookings/upcoming?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); upcoming = upResp.result || []; } catch (e) { upcoming = []; }
+        // Coach assignment: read the trainer out of the booking resource for every
+        // 1-on-1 coaching / PT booking (this is where "Laura Coaching Session" lives).
+        for (const b of [...past, ...upcoming]) {
+          const blob = `${b.name || ''} ${b.type || ''}`;
+          if (/squad|\bpod/i.test(blob)) continue;
+          if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
+          const tr = coachFromResource(b.name) || parseTrainer(b.type) || coachFromResource(b.type);
+          if (!tr) continue;
+          const v = (coachVotes[m.id] = coachVotes[m.id] || { _email: m.email });
+          v[tr] = (v[tr] || 0) + 1;
+        }
+        // Next upcoming 1-on-1 appointment (any trainer).
+        let nb = null;
+        for (const b of upcoming) {
+          const blob = `${b.name || ''} ${b.type || ''}`;
+          if (/squad|\bpod/i.test(blob)) continue;
+          if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
+          if (!b.day) continue;
+          const d = new Date(b.day); if (isNaN(d) || d < today0) continue;
+          if (!nb || new Date(b.day) < new Date(nb.day)) nb = { day: b.day };
+        }
+        if (nb) {
+          const lk = String(m.surname || '').toLowerCase().replace(/['\-\s]/g, '');
+          const label = new Date(nb.day).toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric', month: 'short' });
+          if (lk) nextBooking[lk] = { label, date: nb.day };
+          nextBookingById[m.id] = { label, date: nb.day };
+        }
         const active = ms.find(x => !x.enddate) || ms[0];
         const cz = parseCoaching(active && active.name);
         const rows = [];
@@ -214,6 +257,15 @@ export default async () => {
     }
 
     await sbWriteBlob('holds-snapshot', JSON.stringify({ updated: new Date().toISOString(), holds: holdsOut }));
+    // Coach assignment from booking resources (covers coaching + PT, every trainer).
+    const coachById = {}, coachByEmail = {};
+    for (const id of Object.keys(coachVotes)) {
+      const v = coachVotes[id];
+      const ranked = Object.entries(v).filter(([k]) => k !== '_email').sort((a, b) => b[1] - a[1]);
+      if (ranked.length) { coachById[id] = ranked[0][0]; if (v._email) coachByEmail[String(v._email).toLowerCase()] = ranked[0][0]; }
+    }
+    if (Object.keys(coachById).length) await sbWriteBlob('member-coaches', JSON.stringify({ updated: new Date().toISOString(), byId: coachById, byEmail: coachByEmail }));
+    if (Object.keys(nextBooking).length) await sbWriteBlob('pt-bookings', JSON.stringify({ updated: new Date().toISOString(), bookings: nextBooking, byId: nextBookingById }));
     await sbPatch('sync_log', `id=eq.${logId}`, {
       finished_at: new Date().toISOString(), members_scanned: scanned,
       sessions_upserted: upserted, status: 'ok',
