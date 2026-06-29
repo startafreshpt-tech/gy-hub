@@ -153,7 +153,7 @@ export default async () => {
   const coachVotes = {};            // memberId -> { TrainerName: count, _email }
   const nextBooking = {};           // surnameKey -> { label, date }
   const nextBookingById = {};        // memberId -> { label, date }
-  let dbgClass = 0, dbgService = 0, dbgSample = null;
+  let dbgClass = 0, dbgService = 0, dbgSample = null, dbgRaw = null;
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   try {
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(SYNC_LOOKBACK_DAYS));
@@ -176,6 +176,7 @@ export default async () => {
         let upcoming = [];
         try {
           const upResp = await gmGet(`/portal/api/v2/member/bookings?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
+          if (!dbgRaw) dbgRaw = { keys: Object.keys(upResp || {}), snippet: JSON.stringify(upResp).slice(0, 600) };
           const cb = upResp.classbookings || [], sv = upResp.servicebookings || [];
           dbgClass += cb.length; dbgService += sv.length;
           if (!dbgSample && (cb.length || sv.length)) dbgSample = cb[0] || sv[0];
@@ -273,7 +274,7 @@ export default async () => {
     }
     if (Object.keys(coachById).length) await sbWriteBlob('member-coaches', JSON.stringify({ updated: new Date().toISOString(), byId: coachById, byEmail: coachByEmail }));
     if (Object.keys(nextBooking).length) await sbWriteBlob('pt-bookings', JSON.stringify({ updated: new Date().toISOString(), bookings: nextBooking, byId: nextBookingById }));
-    await sbWriteBlob('debug-bookings', JSON.stringify({ updated: new Date().toISOString(), classbookings_seen: dbgClass, servicebookings_seen: dbgService, next_found: Object.keys(nextBooking).length, sample: dbgSample }));
+    await sbWriteBlob('debug-bookings', JSON.stringify({ updated: new Date().toISOString(), classbookings_seen: dbgClass, servicebookings_seen: dbgService, next_found: Object.keys(nextBooking).length, sample: dbgSample, raw: dbgRaw }));
     await sbPatch('sync_log', `id=eq.${logId}`, {
       finished_at: new Date().toISOString(), members_scanned: scanned,
       sessions_upserted: upserted, status: 'ok',
