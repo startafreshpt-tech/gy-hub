@@ -395,6 +395,7 @@ const BASELINE_WEIGHTS = {
   tz_absent_long:      1.5,  // no Trainerize login 10+ days
   tz_absent_mild:      0.5,  // no Trainerize login 5-9 days
   tz_no_workouts:      1.0,
+  habits_not_tracked:  1.0,   // not ticking any Trainerize habits (engagement gap)
   expiry_soon:         1.0,
   new_member:          0.5,
   payment_count_low:   0.5,  // 3-5 lifetime failures
@@ -411,6 +412,7 @@ function signalToKey(sig) {
   if (s.includes('no trainerize login')) return 'tz_absent_long';
   if (s.includes('trainerize login'))    return 'tz_absent_mild';
   if (s.includes('zero workouts'))       return 'tz_no_workouts';
+  if (s.includes('habits'))              return 'habits_not_tracked';
   if (s.includes('expiry'))              return 'expiry_soon';
   if (s.includes('new member'))          return 'new_member';
   if (s.includes('missed payments')) {
@@ -636,6 +638,7 @@ async function fetchTrainerizeMap(creds, today) {
     let wpw = 0;
     let lastApp = 'Not yet';
     let lastActive = 'Not yet';
+    let habitsDone = 0;
     try {
       const s = await tzGetClientSummary(token, u.id);
       workoutsTotal = (s && s.workoutsTotal) || 0;
@@ -645,10 +648,12 @@ async function fetchTrainerizeMap(creds, today) {
       const ws = (s && s.weeklyStats) || {};
       lastApp = daysAgoStr(ws.lastAppOpen ?? ws.lastOpenDate, today);
       lastActive = daysAgoStr(ws.lastActive ?? ws.lastActivityDate, today);
+      const wkArr = Array.isArray(s && s.weeklyStats) ? s.weeklyStats : [];
+      habitsDone = wkArr.slice(-5).reduce((a, wk) => a + (Number(wk && wk.habitsCompleted) || 0), 0);
     } catch (e) {
       // Matches Python's bare except in refresh_trainerize.py: keep going
       // with defaults rather than aborting the whole run for one client.
-      workoutsTotal = 0; wpw = 0; lastApp = 'Not yet'; lastActive = 'Not yet';
+      workoutsTotal = 0; wpw = 0; lastApp = 'Not yet'; lastActive = 'Not yet'; habitsDone = 0;
     }
 
     if (fullName) {
@@ -665,6 +670,7 @@ async function fetchTrainerizeMap(creds, today) {
           signins_per_week: '-',
           workouts_per_week: wpw ? String(wpw) : '-',
           total_workouts: String(workoutsTotal),
+          habits_tracked: habitsDone > 0,
         });
       }
     }
@@ -809,6 +815,11 @@ function addTrainerizeSignals(client, tz, weights, today) {
   if (wpw === '-' || wpw === '0' || wpw === '') {
     added += w.tz_no_workouts; signals.push('Zero workouts logged');
   }
+
+  if (tz.habits_tracked === false) {
+    added += w.habits_not_tracked; signals.push('No habits tracked');
+  }
+  client.habits_tracked = tz.habits_tracked === true;
 
   client.on_trainerize = true;
   client.trainerize_last_login_days = d;
