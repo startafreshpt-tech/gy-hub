@@ -83,7 +83,7 @@ let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
 async function init(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#root').innerHTML='<div class="auth"><h2>Setup needed</h2><p>Edit public/config.js.</p></div>';return;}
   const {data}=await sb.auth.getSession();STATE.user=data.session?.user||null;
-  if(STATE.user){ if(!(await window.cwGuard(sb,'invoice.html'))) return; }
+  if(STATE.user){ const __r=await window.cwGuard(sb,'invoice.html'); if(!__r) return; window.__ROLE=__r; }
   sb.auth.onAuthStateChange((_e,s)=>{STATE.user=s?.user||null;render();});
   render();
 }
@@ -96,7 +96,7 @@ async function signOut(){await sb.auth.signOut();}
 
 function render(){
   if(!STATE.user){renderAuth();return;}
-  $('#root').innerHTML=`<div class="header"><h1>🌿 GY Session Reconciliation</h1>
+  $('#root').innerHTML=(window.cwNav?window.cwNav(window.__ROLE,'invoice.html'):'')+`<div class="header"><h1>🌿 GY Session Reconciliation</h1>
    <div class="right"><a href="index.html" style="color:#fff;font-size:12px;opacity:.85;text-decoration:none">‹ Hub</a><span class="who">${STATE.user.email}</span><button onclick="signOut()">Sign out</button></div></div>
    <div class="tabs">
      <button class="tab ${STATE.tab==='check'?'active':''}" onclick="setTab('check')">Invoice Check</button>

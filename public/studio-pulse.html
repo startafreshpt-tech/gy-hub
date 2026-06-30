@@ -61,7 +61,7 @@ async function boot(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#app').innerHTML='<div class="loading">Setup needed.</div>';return;}
   const {data:sess}=await sb.auth.getSession();
   if(!sess.session){location.replace('index.html');return;}
-  if(!(await window.cwGuard(sb,'studio-pulse.html'))) return;
+  const __r=await window.cwGuard(sb,'studio-pulse.html'); if(!__r) return; window.__ROLE=__r;
   const {data,error}=await sb.from('invoices').select('raw_text,created_at').eq('source','studio-pulse-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle();
   if(error||!data||!data.raw_text){$('#app').innerHTML='<div class="header"><a href="index.html">‹ Hub</a></div><div class="loading">Churn data is being prepared — the weekly sync hasn’t produced a snapshot yet. Check back shortly.</div>';return;}
   try{ D=JSON.parse(data.raw_text); }catch(e){ $('#app').innerHTML='<div class="loading" style="color:#b91c1c">Could not read churn data.</div>'; return; }
@@ -81,7 +81,7 @@ function render(){
   const s=D.summary||{}, rev=D.revenue_at_risk||{}, ph=D.payment_history_summary||{};
   const totalLTV=(D.clients||[]).reduce((a,c)=>a+(c.ltv||0),0);
   const tzPct=s.trainerize_connected!=null?s.trainerize_connected:Math.round(100*(D.clients||[]).filter(c=>c.on_trainerize).length/Math.max(1,(D.clients||[]).length));
-  $('#app').innerHTML=`
+  $('#app').innerHTML=(window.cwNav?window.cwNav(window.__ROLE,'studio-pulse.html'):'')+`
   <div class="header"><h1>📉 Studio Pulse — Churn Intelligence</h1>
     <div><a href="index.html">‹ Hub</a> &nbsp; <span class="sub">updated ${(D.trainerize_last_refresh||D.updated||'').slice(0,10)}</span> &nbsp; <a href="#" onclick="signOut();return false">Sign out</a></div></div>
   <div class="wrap">

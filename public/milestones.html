@@ -10,14 +10,14 @@ window.addEventListener('DOMContentLoaded',async()=>{
     const sb=window.supabase.createClient(c.SUPABASE_URL,c.SUPABASE_ANON_KEY);
     const {data:sess}=await sb.auth.getSession();
     if(!sess.session){location.replace('index.html');return;}
-    if(!(await window.cwGuard(sb,'milestones.html'))) return;
+    window.sb=sb; const __r=await window.cwGuard(sb,'milestones.html'); if(!__r) return; window.__ROLE=__r;
     const {data,error}=await sb.from('invoices').select('raw_text,created_at').eq('source','milestones-snapshot').order('created_at',{ascending:false}).limit(1).maybeSingle();
     const gate=document.getElementById('gate');
     if(error||!data||!data.raw_text){ if(gate)gate.remove(); document.body.innerHTML='<div style="max-width:680px;margin:60px auto;font-family:sans-serif;color:#475569;padding:0 20px"><a href=index.html style=color:#1a3a2a>\u2039 Hub</a><h2>Milestones data is being prepared</h2><p>The weekly Trainerize refresh hasn\u2019t completed yet \u2014 check back shortly.</p></div>'; return; }
     window.__DATA__=JSON.parse(data.raw_text);
     if(gate)gate.remove();
     if(window.__renderMS){try{window.__renderMS();}catch(err){document.body.insertAdjacentHTML('afterbegin','<p style="color:#b91c1c;font-family:sans-serif;padding:16px">Render error: '+err.message+'</p>');}}
-    const bl=document.createElement('a'); bl.href='index.html'; bl.textContent='\u2039 Hub'; bl.style.cssText='position:fixed;top:10px;left:12px;z-index:9999;background:#1a3a2a;color:#fff;padding:6px 12px;border-radius:6px;font:600 12px -apple-system,sans-serif;text-decoration:none'; document.body.appendChild(bl);
+    if(window.cwNav)document.body.insertAdjacentHTML('afterbegin', window.cwNav(window.__ROLE,'milestones.html'));
   }catch(e){const g=document.getElementById('gate');if(g)g.remove();document.body.insertAdjacentHTML('afterbegin','<p style="color:#b91c1c;font-family:sans-serif;padding:20px">Could not load Milestones: '+e.message+'</p>');}
 });
 </script>
