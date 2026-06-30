@@ -215,7 +215,7 @@ export default async () => {
         const active = ms.find(x => !x.enddate) || ms[0];
         const cz = parseCoaching(active && active.name);
         // Initial sign-up cash (the 6-week PIF / onramp), separate from the ongoing membership.
-        const pifM = (ms || []).find(x => /pif|onramp|on.?ramp|paid.?in.?full|\bintro\b|kick.?start|6\s*week/i.test(x.name || ''));
+        const pifM = (ms || []).find(x => /\bpif\b|onramp|on.?ramp|paid.?in.?full|kick.?start/i.test(x.name || ''));
         let signupCash = null;
         if (pifM) { const mm = String(pifM.name || '').match(/\$([\d,]+(?:\.\d+)?)/); signupCash = mm ? mm[1].replace(/,/g, '') : (pifM.price != null ? String(pifM.price).replace(/[^0-9.]/g, '') : null); }
         const rows = [];
@@ -248,7 +248,7 @@ export default async () => {
           full_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
           email: m.email, status: m.status,
           membership: active ? active.name : null,
-          membership_start: active && active.startdate ? String(active.startdate).slice(0,10) : null,
+          membership_start: active ? String(active.startdate || active.start || active.begindate || active.datestart || '').slice(0,10) || null : null,
           coach_weeks: cz ? cz.weeks : null, coach_minutes: cz ? cz.minutes : null, coach_count: cz ? cz.count : null,
           lead_source: leadSource || m.sourcepromotion || null,
           signup_cash: signupCash,
