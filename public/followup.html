@@ -190,6 +190,7 @@ function renderSaveBar(){
 function render(){
   const list=filtered();
   document.getElementById('app').innerHTML=
+    (window.cwNav?window.cwNav(window.__ROLE,'followup.html'):'')+
     `<div class="header"><h1>📞 Client Follow-Up</h1><div><span class="week-badge">${getWeekDisplay()}</span> &nbsp; <a href="index.html">‹ Hub</a> &nbsp; <a href="#" onclick="signOut();return false">Sign out</a></div></div>`+
     renderStats()+renderFilters()+
     `<div class="client-list">${list.length?list.map(c=>renderCard(c,allClients.indexOf(c))).join(''):'<div class="empty-state">No clients in this filter.</div>'}</div>`+
@@ -238,7 +239,7 @@ async function boot(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){document.getElementById('app').innerHTML='<div class="loading">Setup needed.</div>';return;}
   const {data:sess}=await sb.auth.getSession();
   if(!sess.session){location.replace('index.html');return;}
-  if(!(await window.cwGuard(sb,'followup.html'))) return;
+  const __role=await window.cwGuard(sb,'followup.html'); if(!__role) return; window.__ROLE=__role;
   ME=sess.session.user?.email||'';
   weekKey=getWeekKey();
   try{
