@@ -115,6 +115,18 @@ function setTab(t){if(STATE.tab==='check'){const a=$('#trn'),b=$('#from'),c=$('#
 async function loadTrainers(){if(!STATE.trainers.length){const{data}=await sb.from('trainers').select('*').eq('active',true).order('is_contractor',{ascending:false}).order('name');STATE.trainers=data||[];}return STATE.trainers;}
 async function loadClientsMap(){if(!STATE.clientsMap){const{data}=await sb.from('clients').select('full_name,membership,lead_source,signup_cash');const m={};for(const c of (data||[])){if(c.full_name)m[c.full_name.toLowerCase()]={membership:c.membership||'',lead:c.lead_source||'',signup:c.signup_cash||''};}STATE.clientsMap=m;}return STATE.clientsMap;}
 function priceFromMembership(p){if(!p)return null;const m=String(p).match(/\$([\d,]+(?:\.\d+)?)/);return m?m[1].replace(/,/g,''):null;}
+async function loadSalesLog(){const{data}=await sb.from('sales_log').select('sig,cash,lead_source');const m={};for(const r of (data||[]))m[r.sig]={cash:r.cash,lead:r.lead_source};return m;}
+async function loadAllocation(){
+  if(STATE.alloc) return STATE.alloc;
+  const {data:cli}=await sb.from('clients').select('full_name,coach_weeks,coach_count,membership_start').not('coach_count','is',null);
+  let all=[],from=0;
+  for(;;){const {data}=await sb.from('sessions').select('client_name,session_date').in('session_kind',['individual','onboard','couple']).range(from,from+999);if(!data||!data.length)break;all=all.concat(data);if(data.length<1000)break;from+=1000;}
+  const byName={};for(const s of all){const n=(s.client_name||'').toLowerCase();if(!n)continue;const b=byName[n]||(byName[n]={count:0,first:s.session_date});b.count++;if(s.session_date&&(!b.first||s.session_date<b.first))b.first=s.session_date;}
+  const today=new Date();const map={};
+  for(const c of (cli||[])){const n=(c.full_name||'').toLowerCase();const d=byName[n]||{count:0,first:null};const start=c.membership_start||d.first;if(!start)continue;const wks=Math.max(0,(today-new Date(start))/6048e5);const cw=Number(c.coach_weeks)||1,cc=Number(c.coach_count)||1;const allocated=Math.floor(wks/cw)*cc;map[n]={name:c.full_name,delivered:d.count,allocated,cw,cc,weeks:Math.round(wks)};}
+  STATE.alloc=map;return map;
+}
+function allocCell(client,alloc){const a=alloc[(client||'').toLowerCase()];if(!a)return '';const over=a.delivered-a.allocated;const col=over>0?'#b45309':(over<0?'#b91c1c':'#15803d');return `<span style="color:${col};font-weight:700" title="${a.cc} per ${a.cw}wk · ${a.weeks}wk in">${a.delivered} of ${a.allocated}</span>`;}
 
 // ---------------- INVOICE CHECK ----------------
 async function viewCheck(){
@@ -191,7 +203,11 @@ function downloadInvoiceSheet(){
   XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
 }
 function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad',sales:'Discovery'}[g]||g;}
-function updateCash(i,val){const e=STATE.expected;if(!e||!e._salesRows[i])return;e._salesRows[i].cash=val.replace(/[^0-9.]/g,'');const tot=e._salesRows.reduce((a,r)=>a+(Number(String(r.cash).replace(/[^0-9.]/g,''))||0),0);const el=document.getElementById('cashTotal');if(el)el.textContent=money(tot);STATE.outHTML=document.getElementById('out').innerHTML;}
+async function saveSales(i,field,val){const e=STATE.expected;if(!e||!e._salesRows[i])return;const r=e._salesRows[i];
+  if(field==='cash'){r.cash=val.replace(/[^0-9.]/g,'');const tot=e._salesRows.reduce((a,x)=>a+(Number(String(x.cash).replace(/[^0-9.]/g,''))||0),0);const el=document.getElementById('cashTotal');if(el)el.textContent=money(tot);}
+  else{r.lead=val;}
+  STATE.outHTML=document.getElementById('out').innerHTML;
+  try{await sb.from('sales_log').upsert({sig:r.sig,person:r.person,sale_date:r.date,cash:String(r.cash||''),lead_source:String(r.lead||''),updated_by:(STATE.user&&STATE.user.email)||'',updated_at:new Date().toISOString()},{onConflict:'sig'});}catch(err){console.warn('sales save failed',err);}}
 function rowAmtG(r,rate){const v={m30:(30/60)*rate,m45:(45/60)*rate,m60:rate,pod:(Number(r.mins||60)/60)*rate,sqd:rate,sales:0};return v[r.group]||0;}
 function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el.checked:!e._excluded.has(i);if(billed)e._excluded.delete(i);else e._excluded.add(i);if(el){if(el.checked)el.setAttribute('checked','checked');else el.removeAttribute('checked');}recomputeInvoice();}
 function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const holiday=e.isEmp?sum*(e.holPct||0):0;const grand=(e.gstable?sum*(1+GST):sum)+holiday;e.holiday=holiday;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
@@ -201,6 +217,8 @@ async function genExpected(){
   $('#out').innerHTML='<div class="loading"><div class="spinner"></div>Building expected invoice…</div>';
   const tr=STATE.trainers.find(t=>t.name===trainer)||{};
   const cmap=await loadClientsMap();
+  const slog=await loadSalesLog();
+  const alloc=await loadAllocation();
   const rate=Number(tr.rate_per_hour||50);
   const {data:sess}=await sb.from('sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
   const S=sess||[];
@@ -227,7 +245,7 @@ async function genExpected(){
     ...squads.map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:'Squad',group:'sqd',mins:60,sig:sigOf(s)})),
     ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s)})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
-  const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};return{date:s.session_date,person:nm||'Discovery call',lead:ci.lead||'',membership:ci.membership||'',cash:ci.signup||'',sig:sigOf(s)};}).sort((a,b)=>a.date.localeCompare(b.date));
+  const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};const sg=sigOf(s);const sv=slog[sg]||{};return{date:s.session_date,person:nm||'Discovery call',lead:(sv.lead!=null?sv.lead:(ci.lead||'')),membership:ci.membership||'',cash:(sv.cash!=null&&sv.cash!==''?sv.cash:(ci.signup||'')),sig:sg};}).sort((a,b)=>a.date.localeCompare(b.date));
   STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,isEmp,holPct,holiday,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
@@ -248,14 +266,14 @@ async function genExpected(){
      <div class="tot"><span>Expected total${isEmp?' (incl holiday)':(gstable?' (incl GST)':'')}</span><span>${money(grand)}</span></div>
    </div>
    <div class="panel" style="overflow-x:auto"><h3>Session list — untick anyone you\'re not billing</h3>
-     <table><thead><tr><th>Bill?</th><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th class="num">$</th></tr></thead>
-     <tbody>${billRows.map((r,i)=>`<tr><td style="text-align:center"><input type="checkbox" checked onchange="toggleBill(${i},this)"></td><td>${r.date}</td><td>${r.time}</td><td>${r.client}</td><td>${labelOf(r.group)}</td><td class="num">${money(rowAmtG(r,rate))}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">No billable sessions in this period.</td></tr>'}</tbody></table>
+     <table><thead><tr><th>Bill?</th><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th>Coaching</th><th class="num">$</th></tr></thead>
+     <tbody>${billRows.map((r,i)=>`<tr><td style="text-align:center"><input type="checkbox" checked onchange="toggleBill(${i},this)"></td><td>${r.date}</td><td>${r.time}</td><td>${r.client}</td><td>${labelOf(r.group)}</td><td class="small">${['m30','m45','m60'].includes(r.group)?allocCell(r.client,alloc):''}</td><td class="num">${money(rowAmtG(r,rate))}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">No billable sessions in this period.</td></tr>'}</tbody></table>
      <div class="tot"><span><span id="billCount">${billRows.length}</span> sessions billed${gstable?' (total incl GST)':''}</span><span id="liveTotal">${money(grand)}</span></div>
      <p class="small" style="margin-top:6px">Untick a session you saw but won\'t bill (e.g. a comp) — the total and the downloaded invoice both update.${admin$>0?' Admin '+money(admin$)+' is added on top.':''}</p>
    </div>
    <div class="panel" style="overflow-x:auto;border:2px solid #1a3a2a"><h3>📈 Discovery / Sales — monitor conversions &amp; cash</h3>
      ${salesRows.length?`<table><thead><tr><th>Date</th><th>Person</th><th>Lead source</th><th>Signed up</th><th class="num">Cash collected</th></tr></thead>
-     <tbody>${salesRows.map((r,i)=>`<tr><td>${r.date}</td><td>${r.person}</td><td>${r.lead||'<span class=muted>—</span>'}</td><td>${r.membership?'<span style=color:#15803d>'+r.membership.replace(/^\s*\[\d{4}\]\s*/,'')+'</span>':'<span class=muted>not yet</span>'}</td><td class="num"><input type="text" value="${r.cash?'$'+r.cash:''}" placeholder="$" style="width:90px;text-align:right;border:1px solid #d7dae3;border-radius:5px;padding:3px 6px" oninput="updateCash(${i},this.value)"></td></tr>`).join('')}</tbody></table>
+     <tbody>${salesRows.map((r,i)=>`<tr><td>${r.date}</td><td>${r.person}</td><td><input type="text" value="${(r.lead||'').replace(/"/g,'&quot;')}" placeholder="website / referral / FB ad…" style="width:160px;border:1px solid #d7dae3;border-radius:5px;padding:3px 6px" oninput="saveSales(${i},'lead',this.value)"></td><td>${r.membership?'<span style=color:#15803d>'+r.membership.replace(/^\s*\[\d{4}\]\s*/,'')+'</span>':'<span class=muted>not yet</span>'}</td><td class="num"><input type="text" value="${r.cash?'$'+r.cash:''}" placeholder="$" style="width:90px;text-align:right;border:1px solid #d7dae3;border-radius:5px;padding:3px 6px" oninput="saveSales(${i},'cash',this.value)"></td></tr>`).join('')}</tbody></table>
      <div class="tot"><span>${salesRows.length} discovery call${salesRows.length>1?'s':''} · total cash collected</span><span id="cashTotal">${money(salesRows.reduce((a,r)=>a+(Number(String(r.cash).replace(/[^0-9.]/g,''))||0),0))}</span></div>
      <p class="small" style="margin-top:6px">Lead source is pulled from GymMaster. "Signed up" auto-fills when the prospect becomes a member with a membership. Cash is editable — adjust to the actual amount collected.</p>`:'<div class="note">No discovery/sales calls found for this period. They appear here once captured in the next sync (booking titled Discovery/Sales/Consult).</div>'}
    </div>`;
@@ -440,35 +458,35 @@ async function recDelete(id){
 async function viewCoaching(){
   $('#view').innerHTML=`
    <div class="controls">
-     <div class="field"><label>From</label><input id="cfrom" type="date" value="${daysAgo(84)}"></div>
-     <div class="field"><label>To</label><input id="cto" type="date" value="${todayISO()}"></div>
-     <button class="btn" onclick="runCoaching()">Check coaching owed</button>
+     <button class="btn" onclick="runCoaching()">Build coaching allocation</button>
    </div>
-   <div id="cout"><div class="note">Checks whether clients are getting the coaching their membership entitles them to, over the selected window (default 12 weeks). Compares plan entitlement vs actual checked-in coaching sessions.</div></div>`;
+   <div id="cout"><div class="note">Running total of coaching sessions <b>delivered vs allocated</b> for every client, cumulative since their plan started (e.g. 1 every 6 weeks → 2 allocated after 12 weeks). Shows who's being seen too much or too little — not for penalising, just visibility.</div></div>`;
 }
 async function runCoaching(){
-  const from=$('#cfrom').value,to=$('#cto').value,wks=weeksBetween(from,to);
-  $('#cout').innerHTML='<div class="loading"><div class="spinner"></div>Checking entitlements…</div>';
-  const {data:clients}=await sb.from('clients').select('gm_member_id,full_name,membership,coach_weeks,coach_minutes,coach_count').not('coach_weeks','is',null);
-  const {data:sess}=await sb.from('sessions').select('gm_member_id').gte('session_date',from).lte('session_date',to).in('session_kind',['individual','onboard','couple']).eq('attended',true);
-  const del={};(sess||[]).forEach(s=>{del[s.gm_member_id]=(del[s.gm_member_id]||0)+1;});
-  const rows=(clients||[]).map(c=>{
-    const expected=Math.round(wks/Number(c.coach_weeks)*Number(c.coach_count||1));
-    const got=del[c.gm_member_id]||0;
-    return {name:c.full_name||'—',plan:`${(c.coach_count>1?c.coach_count+'×':'')}${c.coach_minutes}min / ${c.coach_weeks}wk`,expected,got,owed:expected-got};
-  }).filter(r=>r.expected>0).sort((a,b)=>b.owed-a.owed);
-  const under=rows.filter(r=>r.owed>0).length;
+  $('#cout').innerHTML='<div class="loading"><div class="spinner"></div>Building running totals…</div>';
+  STATE.alloc=null; // refresh
+  const alloc=await loadAllocation();
+  const rows=Object.values(alloc).filter(a=>a.cc).map(a=>({...a,dev:a.delivered-a.allocated}))
+    .sort((x,y)=>Math.abs(y.dev)-Math.abs(x.dev));
+  const over=rows.filter(r=>r.dev>0).length, under=rows.filter(r=>r.dev<0).length, ontrack=rows.filter(r=>r.dev===0).length;
+  const cad=a=>`${a.cc} / ${a.cw}wk`;
   $('#cout').innerHTML=`
    <div class="cards">
-     <div class="card"><div class="k">Clients with a plan</div><div class="v">${rows.length}</div><div class="sub">${wks}-week window</div></div>
-     <div class="card"><div class="k">Under-served</div><div class="v" style="color:${under?'#b91c1c':'#166534'}">${under}</div><div class="sub">owed coaching sessions</div></div>
+     <div class="card"><div class="k">Coaching clients</div><div class="v">${rows.length}</div><div class="sub">running total since plan start</div></div>
+     <div class="card"><div class="k">Over-serviced</div><div class="v" style="color:#b45309">${over}</div><div class="sub">seen more than allocated</div></div>
+     <div class="card"><div class="k">Under-serviced</div><div class="v" style="color:#b91c1c">${under}</div><div class="sub">not seen enough</div></div>
+     <div class="card"><div class="k">On track</div><div class="v" style="color:#166534">${ontrack}</div></div>
    </div>
-   <div class="panel" style="overflow-x:auto"><h3>Coaching owed — entitlement vs delivered</h3>
-     <table><thead><tr><th>Client</th><th>Plan</th><th class="num">Due</th><th class="num">Delivered</th><th>Status</th></tr></thead>
-     <tbody>${rows.map(r=>`<tr><td>${r.name}</td><td class="small">${r.plan}</td><td class="num">${r.expected}</td><td class="num">${r.got}</td><td>${r.owed>0?`<span class="flag f-over">Owed ${r.owed}</span>`:r.owed<0?`<span class="flag f-under">+${-r.owed} extra</span>`:`<span class="flag f-ok">On track</span>`}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No clients with a coaching plan yet — run a Sync.</td></tr>'}</tbody></table>
-     <p class="small" style="margin-top:6px">Due = sessions the plan entitles them to in this window. Based on checked-in 1-on-1 coaching only. "Owed" = client isn't getting their coaching — worth following up.</p>
+   <div class="panel" style="overflow-x:auto"><h3>Coaching allocation — running total (delivered of allocated)</h3>
+     <div class="controls" style="margin-bottom:8px"><input class="search" id="csearch" placeholder="Search clients…" oninput="filterCoaching(this.value)"></div>
+     <table><thead><tr><th>Client</th><th>Plan</th><th class="num">Weeks in</th><th class="num">Delivered</th><th class="num">Allocated</th><th>Running total</th></tr></thead>
+     <tbody id="coachBody">${rows.map(r=>coachRow(r,cad)).join('')||'<tr><td colspan="6" class="muted">No coaching plans found — run a Sync.</td></tr>'}</tbody></table>
+     <p class="small" style="margin-top:6px">Cumulative since each plan started. <b style="color:#b45309">amber</b> = seen more than allocated, <b style="color:#b91c1c">red</b> = under (not seen enough), <b style="color:#15803d">green</b> = on track. Not for penalising — just to spot who's getting too much or too little.</p>
    </div>`;
+  STATE.coachRows=rows; STATE.coachCad=cad;
 }
+function coachRow(r,cad){const col=r.dev>0?'#b45309':(r.dev<0?'#b91c1c':'#15803d');return `<tr><td>${r.name}</td><td class="small">${cad(r)}</td><td class="num">${r.weeks}</td><td class="num">${r.delivered}</td><td class="num">${r.allocated}</td><td style="color:${col};font-weight:700">${r.delivered} of ${r.allocated}${r.dev>0?' (+'+r.dev+')':''}</td></tr>`;}
+function filterCoaching(q){const rows=STATE.coachRows||[];const ql=q.toLowerCase();const f=rows.filter(r=>(r.name||'').toLowerCase().includes(ql));const b=document.getElementById('coachBody');if(b)b.innerHTML=f.map(r=>coachRow(r,STATE.coachCad)).join('')||'<tr><td colspan="6" class="muted">No match.</td></tr>';}
 
 init();
 </script>

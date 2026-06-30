@@ -23,7 +23,7 @@ function parseTrainer(s) {
 }
 // Known coach first names — used to read the trainer out of a GymMaster booking
 // resource like "Laura Roukema (Laura Coaching Session 45min)" or "PT Gavyn".
-const COACH_NAMES = ['Gavyn','Scott','Caron','Ethan','Laura','Natalie','Kerry','Ross','Emma'];
+const COACH_NAMES = ['Gavyn','Scott','Caron','Ethan','Laura','Natalie','Kerry','Ross','Emma','Alex','Louise'];
 function coachFromResource(s) {
   if (!s) return null;
   const t = String(s).toLowerCase();
@@ -248,6 +248,7 @@ export default async () => {
           full_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
           email: m.email, status: m.status,
           membership: active ? active.name : null,
+          membership_start: active && active.startdate ? String(active.startdate).slice(0,10) : null,
           coach_weeks: cz ? cz.weeks : null, coach_minutes: cz ? cz.minutes : null, coach_count: cz ? cz.count : null,
           lead_source: leadSource || m.sourcepromotion || null,
           signup_cash: signupCash,
