@@ -75,7 +75,7 @@ const norm=s=>(s||'').toLowerCase().replace(/['’\-\s.]/g,'');
 
 // Admin weekly-hour caps by caseload band (updated when Trainerize caseload syncs)
 const ADMIN_CAP={Caron:1.0,Ethan:2.5,Laura:1.5,Natalie:1.5};
-const GST_TRAINERS=['Gavyn','Ethan','Caron']; const GST=0.15; // Scott salaried, Laura is a casual employee (no GST)
+const GST_TRAINERS=['Gavyn','Ethan']; const GST=0.15; // Scott salaried; Laura casual employee; Caron not GST-registered (all no GST)
 const EMPLOYEES=['Laura']; const HOLIDAY_PCT=0.08; // casual employees: 8% holiday pay, no GST
 const CASELOAD={Gavyn:64,Scott:91,Caron:6,Ethan:49,Laura:22,Natalie:24}; // current Trainerize client numbers
 let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
