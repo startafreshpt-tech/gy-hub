@@ -127,17 +127,26 @@ async function buildDATA(){
     if(Number.isFinite(sR.workoutsTotal)) a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
     if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
     a.combined=(a.lifetime||0)+(a.activities||0);
-    // Weight from the app bodystats feed — the calendar only has in-studio weigh-ins,
-    // so app self-trackers (no calendar bodyStat) were missed. Fill first/current
-    // weight from the bodystats array when the calendar gave nothing.
+    // Body weight from the app feed. The calendar only logs in-studio weigh-ins, so
+    // app self-trackers (e.g. Mark Bavister) were missed entirely. getClientSummary
+    // returns only a recent window, so we walk BACK month-by-month with /bodystats/get
+    // (unitBodystats is REQUIRED or it 406s) to find the true starting weight.
     const bsA=(sR.bodystats||[]).filter(x=>x&&Number(x.weight)>0);
-    if(bsA.length>=2 && (a.first_bw_lb==null || a.bw_now_lb==null)){
-      const KG2LB=1/LB2KG;
-      a.first_bw_lb=Number(bsA[0].weight)*KG2LB;
-      a.bw_now_lb=Number(bsA[bsA.length-1].weight)*KG2LB;
-      a.first_date=(bsA[0].date||'').slice(0,10);
-      a.bs_date_now=(bsA[bsA.length-1].date||'').slice(0,10);
-      if(a.wt_loss_kg==null){ a.wt_loss_kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); a.measure_age=0; }
+    if(bsA.length && (a.first_bw_lb==null || a.bw_now_lb==null)){
+      const KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
+      const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
+      let firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
+      const base=new Date(firstD); let empty=0;
+      for(let mo=1; mo<=18 && empty<2; mo++){
+        const d=new Date(base.getFullYear(), base.getMonth()-mo, 1);
+        const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+        const r=await api('/bodystats/get',{userID:a.id,date:ds,...U});
+        const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
+        if(w>0){ firstW=w; firstD=ds; empty=0; } else empty++;
+      }
+      a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
+      a.first_date=firstD; a.bs_date_now=curD;
+      a.wt_loss_kg=round1(firstW-curW); a.measure_age=0;
     }
   }, 5);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
