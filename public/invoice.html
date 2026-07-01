@@ -224,7 +224,8 @@ async function genExpected(){
   const S=sess||[];
   const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
   const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind));
-  const oneAttDed=dedupe(oneRows.filter(s=>s.attended)), oneAllDed=dedupe(oneRows);
+  const isGavynClient=s=>/\bgavyn\b/i.test(s.client_name||'');
+  const oneAttDed=dedupe(oneRows.filter(s=>s.attended||isGavynClient(s))), oneAllDed=dedupe(oneRows); // Gavyn-as-client counts even if not checked in
   const one$=oneAttDed.reduce((a,s)=>a+(Number(s.billable_minutes||0)/60)*rate,0);
   const pods=dedupe(S.filter(s=>s.session_kind==='pod'));
   const pod$=pods.reduce((a,s)=>a+(Number(s.billable_minutes||60)/60)*rate,0);
