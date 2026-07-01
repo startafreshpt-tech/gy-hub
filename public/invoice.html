@@ -281,6 +281,17 @@ async function genExpected(){
   renderCompare();
 }
 
+function extractInvoiceTotal(text){
+  const t=String(text||'');
+  // 1) prefer explicit labels
+  for(const p of [/total\s*invoiced[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i,/grand\s*total[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i,/amount\s*due[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i,/balance\s*due[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i]){
+    const m=t.match(p); if(m) return Number(m[1].replace(/,/g,''));
+  }
+  // 2) fallback: the LAST 'total ... $amount' on the page (the grand total)
+  const re=/\btotal\b[^0-9$%]*\$?\s*([\d,]+(?:\.\d+)?)/ig; let m,last=null;
+  while((m=re.exec(t))) last=m[1];
+  return last!=null?Number(last.replace(/,/g,'')):null;
+}
 async function parseInvoice(ev){
   const f=ev.target.files[0];if(!f)return;
   $('#cmp').innerHTML='<div class="loading"><div class="spinner"></div>Reading invoice…</div>';
@@ -291,8 +302,7 @@ async function parseInvoice(ev){
       const pdf=await pdfjsLib.getDocument({data:buf}).promise;
       let text='';
       for(let i=1;i<=pdf.numPages;i++){const pg=await pdf.getPage(i);const tc=await pg.getTextContent();text+=tc.items.map(it=>it.str).join(' ')+'\n';}
-      const m=text.match(/total\s+invoiced[^0-9$]*\$?\s*([\d,]+(?:\.\d+)?)/i);
-      STATE.actual={sheet:f.name,invoiced:m?Number(m[1].replace(/,/g,'')):null};
+      STATE.actual={sheet:f.name,invoiced:extractInvoiceTotal(text)};
     }else{
       const buf=await f.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
@@ -300,7 +310,8 @@ async function parseInvoice(ev){
       wb.SheetNames.forEach(n=>{const rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,blankrows:false});if(rows.length>bestRows.length){best=n;bestRows=rows;}});
       const rows=bestRows.map(r=>r.map(c=>(c==null?'':String(c).trim())));
       let invoiced=null;
-      rows.forEach(r=>{const j=r.join(' ').toLowerCase();if(j.includes('total invoiced')){const nums=r.map(x=>Number(String(x).replace(/[,$]/g,''))).filter(n=>!isNaN(n)&&n!==0);if(nums.length)invoiced=nums[nums.length-1];}});
+      rows.forEach(r=>{const j=r.join(' ').toLowerCase();if(/total\s*invoiced|grand\s*total|\btotal\b/.test(j)){const nums=r.map(x=>Number(String(x).replace(/[,$]/g,''))).filter(n=>!isNaN(n)&&n!==0);if(nums.length)invoiced=nums[nums.length-1];}});
+      if(invoiced==null) invoiced=extractInvoiceTotal(rows.map(r=>r.join(' ')).join('\n'));
       STATE.actual={sheet:best||f.name,invoiced};
     }
     renderCompare();
