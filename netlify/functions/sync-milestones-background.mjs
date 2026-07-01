@@ -127,6 +127,18 @@ async function buildDATA(){
     if(Number.isFinite(sR.workoutsTotal)) a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
     if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
     a.combined=(a.lifetime||0)+(a.activities||0);
+    // Weight from the app bodystats feed — the calendar only has in-studio weigh-ins,
+    // so app self-trackers (no calendar bodyStat) were missed. Fill first/current
+    // weight from the bodystats array when the calendar gave nothing.
+    const bsA=(sR.bodystats||[]).filter(x=>x&&Number(x.weight)>0);
+    if(bsA.length>=2 && (a.first_bw_lb==null || a.bw_now_lb==null)){
+      const KG2LB=1/LB2KG;
+      a.first_bw_lb=Number(bsA[0].weight)*KG2LB;
+      a.bw_now_lb=Number(bsA[bsA.length-1].weight)*KG2LB;
+      a.first_date=(bsA[0].date||'').slice(0,10);
+      a.bs_date_now=(bsA[bsA.length-1].date||'').slice(0,10);
+      if(a.wt_loss_kg==null){ a.wt_loss_kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); a.measure_age=0; }
+    }
   }, 5);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now)alltime=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);
