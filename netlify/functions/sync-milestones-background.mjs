@@ -131,7 +131,9 @@ async function buildDATA(){
     // app self-trackers (e.g. Mark Bavister) were missed entirely. getClientSummary
     // returns only a recent window, so we walk BACK month-by-month with /bodystats/get
     // (unitBodystats is REQUIRED or it 406s) to find the true starting weight.
-    const bsA=(sR.bodystats||[]).filter(x=>x&&Number(x.weight)>0);
+    // Only REAL measurements: exclude projected values and implausible weights (35-250kg).
+    const realW=w=>Number.isFinite(w)&&w>=35&&w<=250;
+    const bsA=(sR.bodystats||[]).filter(x=>x&&!x.isProjected&&realW(Number(x.weight)));
     if(bsA.length && (a.first_bw_lb==null || a.bw_now_lb==null)){
       const KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
       const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
@@ -142,11 +144,20 @@ async function buildDATA(){
         const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
         const r=await api('/bodystats/get',{userID:a.id,date:ds,...U});
         const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
-        if(w>0){ firstW=w; firstD=ds; empty=0; } else empty++;
+        if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
       }
-      a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
-      a.first_date=firstD; a.bs_date_now=curD;
-      a.wt_loss_kg=round1(firstW-curW); a.measure_age=0;
+      // need >=2 real, dated measurements to show a change
+      if(firstD!==curD && realW(firstW) && realW(curW)){
+        a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
+        a.first_date=firstD; a.bs_date_now=curD;
+        a.wt_loss_kg=round1(firstW-curW); a.measure_age=0;
+      }
+    }
+    // Sanity: clear any bogus weight figures (e.g. projected-only or near-zero calendar reads).
+    { const lo=35/LB2KG, hi=250/LB2KG;
+      const bad=x=>x!=null&&(x<lo||x>hi);
+      if(bad(a.first_bw_lb)||bad(a.bw_now_lb)){ a.first_bw_lb=null; a.bw_now_lb=null; a.wt_loss_kg=null; }
+      if(a.first_bw_lb!=null&&a.bw_now_lb!=null){ const ch=Math.abs((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(ch>60){ a.first_bw_lb=null; a.bw_now_lb=null; a.wt_loss_kg=null; } }
     }
   }, 5);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
