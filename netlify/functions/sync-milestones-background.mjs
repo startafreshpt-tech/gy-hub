@@ -146,13 +146,15 @@ async function buildDATA(){
         const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
         if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
       }
-      // If the calendar already found an EARLIER/heavier start, keep it (more of the journey).
-      if(a.first_bw_lb!=null){ const calKg=a.first_bw_lb*LB2KG; if(realW(calKg) && calKg>firstW){ firstW=calKg; firstD=a.first_date||firstD; } }
-      // need >=2 real, dated measurements to show a change
-      if(firstD!==curD && realW(firstW) && realW(curW)){
+      // App-based loss (walk-back). Compare to any existing calendar-based loss and
+      // keep whichever is LARGER and sane — never REDUCE a good in-studio number.
+      const appLoss = (firstD!==curD && realW(firstW) && realW(curW)) ? round1(firstW-curW) : null;
+      const calLoss = (a.first_bw_lb!=null && a.bw_now_lb!=null && a.first_date && a.bs_date_now && a.first_date!==a.bs_date_now)
+        ? round1((a.first_bw_lb-a.bw_now_lb)*LB2KG) : null;
+      if(appLoss!=null && appLoss>0 && (calLoss==null || appLoss>calLoss)){
         a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
         a.first_date=firstD; a.bs_date_now=curD;
-        a.wt_loss_kg=round1(firstW-curW); a.measure_age=0;
+        a.wt_loss_kg=appLoss; a.measure_age=0;
       }
     }
     // Sanity: clear any bogus weight figures (e.g. projected-only or near-zero calendar reads).
