@@ -134,7 +134,7 @@ async function buildDATA(){
     // Only REAL measurements: exclude projected values and implausible weights (35-250kg).
     const realW=w=>Number.isFinite(w)&&w>=35&&w<=250;
     const bsA=(sR.bodystats||[]).filter(x=>x&&!x.isProjected&&realW(Number(x.weight)));
-    if(bsA.length && (a.first_bw_lb==null || a.bw_now_lb==null)){
+    if(bsA.length){
       const KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
       const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
       let firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
@@ -146,6 +146,8 @@ async function buildDATA(){
         const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
         if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
       }
+      // If the calendar already found an EARLIER/heavier start, keep it (more of the journey).
+      if(a.first_bw_lb!=null){ const calKg=a.first_bw_lb*LB2KG; if(realW(calKg) && calKg>firstW){ firstW=calKg; firstD=a.first_date||firstD; } }
       // need >=2 real, dated measurements to show a change
       if(firstD!==curD && realW(firstW) && realW(curW)){
         a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
