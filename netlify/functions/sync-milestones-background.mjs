@@ -145,7 +145,12 @@ async function buildDATA(){
   // /bodystats/get probes are heavy, so they run AFTER the totals above are safely
   // computed and can never throttle the 1000 Club.
   await pool(active, async(a)=>{
-    const bsA=a._bsA; if(!bsA||!bsA.length) return;
+    const bsA=a._bsA; if(!bsA||bsA.length<2) return;
+    // Only walk back for SHORT-window trackers (e.g. daily self-trackers like Rhonda/Mark).
+    // If their bodystats already span 100+ days, that window covers the journey — skip,
+    // which keeps this pass light (~30 members) so it never throttles.
+    const spanDays=(new Date(bsA[bsA.length-1].date)-new Date(bsA[0].date))/864e5;
+    if(!(spanDays>=0) || spanDays>=100) return;
     const realW=w=>Number.isFinite(w)&&w>=35&&w<=250, KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
     const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
     let firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
@@ -164,7 +169,7 @@ async function buildDATA(){
     }
     clampBW(a);
     delete a._bsA;
-  }, 3);
+  }, 2);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const l=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(l>0) alltime=l;}
     const wl=(a.wt_loss_kg>0)?a.wt_loss_kg:null;
