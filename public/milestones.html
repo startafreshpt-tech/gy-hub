@@ -121,6 +121,10 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
     <div class="card"><h3 style="margin:0 0 12px">400 Club <span class="muted" id="c400n"></span></h3><div class="clubgrid" id="c400"></div></div>
     <div class="card"><h3 style="margin:0 0 12px">Approaching 400 (300+)</h3><div id="n400"></div></div>
   </div>
+  <div class="two" style="margin-top:16px">
+    <div class="card"><h3 style="margin:0 0 12px">200 Club <span class="muted" id="c200n"></span></h3><div class="clubgrid" id="c200"></div></div>
+    <div class="card"><h3 style="margin:0 0 12px">100 Club <span class="muted" id="c100n"></span></h3><div class="clubgrid" id="c100"></div></div>
+  </div>
 
   <h2>Strength gains
     <span class="toggle" id="strtoggle">
@@ -254,8 +258,14 @@ function clubs(){
  document.getElementById('n1000').innerHTML=n1000.map(m=>card(m,1000)).join('')||'<div class="muted">None</div>';
  document.getElementById('c400').innerHTML=c400.map(m=>card(m,400)).join('')||'<div class="muted">None yet</div>';
  document.getElementById('n400').innerHTML=n400.map(m=>card(m,400)).join('')||'<div class="muted">None</div>';
+ const c200=M.filter(m=>v(m)>=200&&v(m)<400).sort((a,b)=>v(b)-v(a));
+ const c100=M.filter(m=>v(m)>=100&&v(m)<200).sort((a,b)=>v(b)-v(a));
+ document.getElementById('c200').innerHTML=c200.map(m=>card(m,200)).join('')||'<div class="muted">None yet</div>';
+ document.getElementById('c100').innerHTML=c100.map(m=>card(m,100)).join('')||'<div class="muted">None yet</div>';
  document.getElementById('c1000n').textContent='· '+c1000.length+' members';
  document.getElementById('c400n').textContent='· '+c400.length+' members';
+ document.getElementById('c200n').textContent='· '+c200.length+' members';
+ document.getElementById('c100n').textContent='· '+c100.length+' members';
 }
 document.querySelectorAll('#metric button').forEach(b=>b.onclick=()=>{
  document.querySelectorAll('#metric button').forEach(x=>x.classList.remove('on'));

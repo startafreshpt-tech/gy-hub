@@ -44,6 +44,7 @@ function chunks(startISO,endISO,maxDays=360){const out=[];let s=new Date(startIS
 async function bodystat(uid,date){const r=await api('/bodystats/get',{userID:uid,date,unitBodystats:'cm',unitWeight:'lbs'});
   if(r&&r.code===200){const bm=r.bodyMeasures||{};return{bw_lb:bm.bodyWeight??null,bf:bm.bodyFatPercent??null,waist:bm.waist??null,date:(r.date||'').slice(0,10)};}return null;}
 const round1=x=>x==null?null:Math.round(x*10)/10;
+function clampBW(a){const lo=35/0.45359237,hi=250/0.45359237,bad=x=>x!=null&&(x<lo||x>hi);if(bad(a.first_bw_lb)||bad(a.bw_now_lb)){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}if(a.first_bw_lb!=null&&a.bw_now_lb!=null){const ch=Math.abs((a.first_bw_lb-a.bw_now_lb)*0.45359237);if(ch>60){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}}}
 const num=x=>{const n=Number(x);return Number.isFinite(n)?n:null;};
 const WT=new Set(['oneRepMax','threeRepMax','fiveRepMax','tenRepMax','maxWeight','maxLoad']);
 function extractAccomplishments(stats){let pr=0,mil=0,habit_cnt=0,habit_tot=0,max_streak=0,rdg=false;const names=new Set();const srecs=[];
@@ -127,43 +128,43 @@ async function buildDATA(){
     if(Number.isFinite(sR.workoutsTotal)) a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
     if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
     a.combined=(a.lifetime||0)+(a.activities||0);
-    // Body weight from the app feed. The calendar only logs in-studio weigh-ins, so
-    // app self-trackers (e.g. Mark Bavister) were missed entirely. getClientSummary
-    // returns only a recent window, so we walk BACK month-by-month with /bodystats/get
-    // (unitBodystats is REQUIRED or it 406s) to find the true starting weight.
-    // Only REAL measurements: exclude projected values and implausible weights (35-250kg).
-    const realW=w=>Number.isFinite(w)&&w>=35&&w<=250;
+    // Recent-window weight baseline (NO probing here — one call keeps this pass reliable).
+    const realW=w=>Number.isFinite(w)&&w>=35&&w<=250, KG2LB=1/LB2KG;
     const bsA=(sR.bodystats||[]).filter(x=>x&&!x.isProjected&&realW(Number(x.weight)));
+    a._bsA=bsA;
     if(bsA.length){
-      const KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
       const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
-      let firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
-      const base=new Date(firstD); let empty=0;
-      for(let mo=1; mo<=18 && empty<2; mo++){
-        const d=new Date(base.getFullYear(), base.getMonth()-mo, 1);
-        const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
-        const r=await api('/bodystats/get',{userID:a.id,date:ds,...U});
-        const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
-        if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
-      }
-      // App-based loss (walk-back). Compare to any existing calendar-based loss and
-      // keep whichever is LARGER and sane — never REDUCE a good in-studio number.
-      const appLoss = (firstD!==curD && realW(firstW) && realW(curW)) ? round1(firstW-curW) : null;
-      const calLoss = (a.first_bw_lb!=null && a.bw_now_lb!=null && a.first_date && a.bs_date_now && a.first_date!==a.bs_date_now)
-        ? round1((a.first_bw_lb-a.bw_now_lb)*LB2KG) : null;
-      if(appLoss!=null && appLoss>0 && (calLoss==null || appLoss>calLoss)){
-        a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB;
-        a.first_date=firstD; a.bs_date_now=curD;
-        a.wt_loss_kg=appLoss; a.measure_age=0;
-      }
+      const firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
+      const appLoss=(firstD!==curD)?round1(firstW-curW):null;
+      const calLoss=(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.bs_date_now&&a.first_date!==a.bs_date_now)?round1((a.first_bw_lb-a.bw_now_lb)*LB2KG):null;
+      if(appLoss!=null&&appLoss>0&&(calLoss==null||appLoss>calLoss)){ a.first_bw_lb=firstW*KG2LB;a.bw_now_lb=curW*KG2LB;a.first_date=firstD;a.bs_date_now=curD;a.wt_loss_kg=appLoss;a.measure_age=0; }
     }
-    // Sanity: clear any bogus weight figures (e.g. projected-only or near-zero calendar reads).
-    { const lo=35/LB2KG, hi=250/LB2KG;
-      const bad=x=>x!=null&&(x<lo||x>hi);
-      if(bad(a.first_bw_lb)||bad(a.bw_now_lb)){ a.first_bw_lb=null; a.bw_now_lb=null; a.wt_loss_kg=null; }
-      if(a.first_bw_lb!=null&&a.bw_now_lb!=null){ const ch=Math.abs((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(ch>60){ a.first_bw_lb=null; a.bw_now_lb=null; a.wt_loss_kg=null; } }
-    }
+    clampBW(a);
   }, 5);
+  // WEIGHT HISTORY — a SEPARATE, gentle low-concurrency pass. The month-by-month
+  // /bodystats/get probes are heavy, so they run AFTER the totals above are safely
+  // computed and can never throttle the 1000 Club.
+  await pool(active, async(a)=>{
+    const bsA=a._bsA; if(!bsA||!bsA.length) return;
+    const realW=w=>Number.isFinite(w)&&w>=35&&w<=250, KG2LB=1/LB2KG, U={unitBodystats:'cm',unitWeight:'kg'};
+    const curW=Number(bsA[bsA.length-1].weight), curD=(bsA[bsA.length-1].date||'').slice(0,10);
+    let firstW=Number(bsA[0].weight), firstD=(bsA[0].date||'').slice(0,10);
+    const base=new Date(firstD); let empty=0;
+    for(let mo=1; mo<=15 && empty<2; mo++){
+      const d=new Date(base.getFullYear(), base.getMonth()-mo, 1);
+      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+      const r=await api('/bodystats/get',{userID:a.id,date:ds,...U});
+      const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
+      if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
+      await sleep(120);
+    }
+    const appLoss=(firstD!==curD&&realW(firstW)&&realW(curW))?round1(firstW-curW):null;
+    if(appLoss!=null && appLoss>0 && appLoss>(a.wt_loss_kg||0)){
+      a.first_bw_lb=firstW*KG2LB; a.bw_now_lb=curW*KG2LB; a.first_date=firstD; a.bs_date_now=curD; a.wt_loss_kg=appLoss; a.measure_age=0;
+    }
+    clampBW(a);
+    delete a._bsA;
+  }, 3);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now)alltime=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);
     return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:a.wt_loss_kg,measure_age:a.measure_age,bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
@@ -216,7 +217,8 @@ async function buildDATA(){
     tenure_buckets,longest_members:[],ytd_lost_kg:yl,ytd_losers:yn,ytd_measured:ytn,mtd_lost_kg:mlk,mtd_losers:mn,mtd_measured:mtn,
     str:{ever:period(srecs),month:period(monthRecs)},str_weighted:srecs.length,habit};
   const leaderboard=[...members].sort((a,b)=>b.lifetime-a.lifetime);
-  const clubs={club1000:members.filter(m=>m.lifetime>=1000).sort((a,b)=>b.lifetime-a.lifetime),club400:members.filter(m=>m.lifetime>=400&&m.lifetime<1000).sort((a,b)=>b.lifetime-a.lifetime),near1000:members.filter(m=>m.lifetime>=800&&m.lifetime<1000).sort((a,b)=>b.lifetime-a.lifetime),near400:members.filter(m=>m.lifetime>=300&&m.lifetime<400).sort((a,b)=>b.lifetime-a.lifetime)};
+  const byLife=(lo,hi)=>members.filter(m=>m.lifetime>=lo&&(hi==null||m.lifetime<hi)).sort((a,b)=>b.lifetime-a.lifetime);
+  const clubs={club1000:byLife(1000,null),club400:byLife(400,1000),club200:byLife(200,400),club100:byLife(100,200),near1000:byLife(800,1000),near400:byLife(300,400)};
   return{summary,members,leaderboard,clubs};
 }
 async function sbWrite(dataStr){
