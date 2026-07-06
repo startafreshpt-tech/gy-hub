@@ -166,8 +166,9 @@ async function buildDATA(){
     delete a._bsA;
   }, 3);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
-  const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now)alltime=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);
-    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:a.wt_loss_kg,measure_age:a.measure_age,bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
+  const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const l=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(l>0) alltime=l;}
+    const wl=(a.wt_loss_kg>0)?a.wt_loss_kg:null;
+    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:wl,measure_age:(wl!=null?a.measure_age:null),bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
   const allLoss=[];for(const a of active){if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);allLoss.push({name:a.name,kg,first:round1(a.first_bw_lb*LB2KG),last:round1(a.bw_now_lb*LB2KG)});}}
   const losers=allLoss.filter(r=>saneWt(r.first,r.last,r.kg));
   const waist=[];for(const a of active){if(a.waist_first!=null&&a.waist_now!=null&&a.waist_first>0&&a.waist_now>0)waist.push(round1(a.waist_first-a.waist_now));}const waist_lo=waist.filter(w=>w>0);
