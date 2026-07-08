@@ -202,6 +202,17 @@ function downloadInvoiceSheet(){
   XLSX.utils.book_append_sheet(wb, ws, 'Invoice');
   XLSX.writeFile(wb, `${e.trainer}-invoice-${e.from}_to_${e.to}.xlsx`);
 }
+async function addManualSession(){
+  const e=STATE.expected; if(!e){alert('Generate expected first.');return;}
+  const name=(document.getElementById('msName').value||'').trim();
+  const date=document.getElementById('msDate').value; const mins=Number(document.getElementById('msMins').value)||30;
+  if(!name||!date){document.getElementById('msMsg').textContent='Enter a name and date.';return;}
+  document.getElementById('msMsg').textContent='Adding…';
+  try{
+    await sb.from('manual_sessions').insert({trainer_name:e.trainer,session_date:date,client_name:name,billable_minutes:mins,session_kind:'individual',created_by:(STATE.user&&STATE.user.email)||'',created_at:new Date().toISOString()});
+    genExpected();
+  }catch(err){document.getElementById('msMsg').textContent='Failed: '+(err.message||err);}
+}
 function labelOf(g){return {m30:'30-min',m45:'45-min',m60:'60-min',pod:'Pod',sqd:'Squad',sales:'Discovery'}[g]||g;}
 async function saveSales(i,field,val,el){const e=STATE.expected;if(!e||!e._salesRows[i])return;const r=e._salesRows[i];if(el)el.setAttribute('value',el.value);
   if(field==='cash'){r.cash=val.replace(/[^0-9.]/g,'');const tot=e._salesRows.reduce((a,x)=>a+(Number(String(x.cash).replace(/[^0-9.]/g,''))||0),0);const el=document.getElementById('cashTotal');if(el)el.textContent=money(tot);}
@@ -222,6 +233,8 @@ async function genExpected(){
   const rate=Number(tr.rate_per_hour||50);
   const {data:sess}=await sb.from('sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
   const S=sess||[];
+  const {data:manual}=await sb.from('manual_sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
+  (manual||[]).forEach(ms=>S.push({session_date:ms.session_date,client_name:ms.client_name,session_kind:ms.session_kind||'individual',billable_minutes:ms.billable_minutes,attended:true,start_time:'',service_type:'(manual) '+ms.client_name,gm_booking_id:'manual-'+ms.id}));
   const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
   const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind));
   const isGavynClient=s=>/\bgavyn\b/i.test(s.client_name||'');
@@ -272,6 +285,13 @@ async function genExpected(){
      <table><thead><tr><th>Bill?</th><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th>Att</th><th>Coaching</th><th class="num">$</th></tr></thead>
      <tbody>${billRows.map((r,i)=>`<tr style="${r.notChecked?'color:#94a3b8':''}"><td style="text-align:center"><input type="checkbox" ${r.notChecked?'':'checked'} onchange="toggleBill(${i},this)"></td><td>${r.date}</td><td>${r.time}</td><td>${r.client}</td><td>${labelOf(r.group)}</td><td class="small">${['m30','m45','m60'].includes(r.group)?(r.att?'<span style="color:#15803d">\u2714</span>':'<span style="color:#b91c1c;font-weight:600">\u2718 not in</span>'):''}</td><td class="small">${['m30','m45','m60'].includes(r.group)?allocCell(r.client,alloc):''}</td><td class="num">${money(rowAmtG(r,rate))}</td></tr>`).join('')||'<tr><td colspan="8" class="muted">No sessions in this period.</td></tr>'}</tbody></table>
      <div class="tot"><span><span id="billCount">${billRows.filter(r=>!r.notChecked).length}</span> sessions billed${gstable?' (total incl GST)':''}</span><span id="liveTotal">${money(grand)}</span></div>
+     <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #e2e8f0">
+       <b class="small">Add a session manually</b> <span class="small muted">(for expired/non-members GymMaster can\'t sync, e.g. Matt Trent)</span><br>
+       <input id="msName" placeholder="Client name" style="padding:5px 8px;border:1px solid #d7dae3;border-radius:5px;margin:6px 6px 0 0">
+       <input id="msDate" type="date" value="${from}" style="padding:5px 8px;border:1px solid #d7dae3;border-radius:5px;margin:6px 6px 0 0">
+       <select id="msMins" style="padding:5px 8px;border:1px solid #d7dae3;border-radius:5px;margin:6px 6px 0 0"><option value="30">30-min</option><option value="45">45-min</option><option value="60">60-min</option></select>
+       <button class="btn sec" onclick="addManualSession()" style="margin-top:6px">+ Add session</button> <span id="msMsg" class="small"></span>
+     </div>
      <p class="small" style="margin-top:6px"><span style="color:#15803d">\u2714</span> checked in · <span style="color:#b91c1c">\u2718 not in</span> = booked but not checked in (greyed, not billed — tick it if it happened and you want to bill). Untick anyone you won't bill.${admin$>0?' Admin '+money(admin$)+' is added on top.':''}</p>
    </div>
    <div class="panel" style="overflow-x:auto;border:2px solid #1a3a2a"><h3>📈 Discovery / Sales — monitor conversions &amp; cash</h3>
