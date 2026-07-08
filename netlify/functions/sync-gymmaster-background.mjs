@@ -67,6 +67,36 @@ function parseCoaching(name){
   return null;
 }
 async function gmGet(path) { return (await fetch(`${GYMMASTER_BASE_URL}${path}`)).json(); }
+// TEMP diagnostic: probe standard_report IDs to find the appointments/attendance report.
+async function gmStdReport(reportId, startDate, endDate) {
+  try {
+    const r = await fetch(`${GYMMASTER_BASE_URL}/api/v2/report/standard_report`, {
+      method: 'POST',
+      headers: { 'X-GM-API-KEY': GYMMASTER_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ report_id: reportId, start_date: startDate, end_date: endDate }),
+    });
+    const status = r.status;
+    let j = null; try { j = await r.json(); } catch { return { id: reportId, status, n: 0 }; }
+    let rows = Array.isArray(j) ? j : (j && j.result !== undefined ? j.result : j);
+    if (rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
+    if (Array.isArray(rows) && rows.length) {
+      return { id: reportId, status, n: rows.length, cols: Object.keys(rows[0] || {}), sample: rows[0] };
+    }
+    return { id: reportId, status, n: 0 };
+  } catch (e) { return { id: reportId, err: String(e).slice(0, 80) }; }
+}
+async function probeReports() {
+  const end = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+  const found = [];
+  const ids = []; for (let i = 1; i <= 500; i++) ids.push(i);
+  const POOL = 8;
+  for (let i = 0; i < ids.length; i += POOL) {
+    const res = await Promise.all(ids.slice(i, i + POOL).map((id) => gmStdReport(id, start, end)));
+    for (const r of res) if (r && r.n > 0) found.push(r);
+  }
+  await sbWriteBlob('debug-reports', JSON.stringify({ updated: new Date().toISOString(), range: [start, end], count: found.length, found }));
+}
 async function gmPost(path, body) {
   return (await fetch(`${GYMMASTER_BASE_URL}${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -143,6 +173,7 @@ export default async () => {
   }
   const log = await sbInsertReturn('sync_log', { status: 'running' });
   const logId = log?.id;
+  try { await probeReports(); } catch (e) { console.log('probe err', e); }
 
   const trainers = await sbSelect('trainers', 'select=name,gm_staffid');
   const byStaffId = {}; const names = (trainers || []).map(t => t.name);
