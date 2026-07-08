@@ -160,9 +160,11 @@ export default async () => {
 
     const membersResp = await gmGet(`/portal/api/v1/members?api_key=${GYMMASTER_API_KEY}&companyid=${GYMMASTER_COMPANY_ID}`);
     const allMembers = membersResp.result || [];
-    // Process EVERY current member for SESSIONS (so a checked-in session is never
-    // missed because of membership status). Follow-Up/clients stays active-only below.
-    const members = allMembers;
+    // Active statuses only. /members returns ~1,993 (1,752 Expired); scanning all
+    // took 43min AND can't fetch Expired members' bookings anyway (member-portal
+    // login fails for expired accounts). Expired-but-training clients (Matt Trent)
+    // are handled by manual add instead.
+    const members = allMembers.filter(m => ACTIVE_STATUSES.includes(m.status));
     const _statusTally = {}; for (const mm of allMembers) _statusTally[mm.status || '(none)'] = (_statusTally[mm.status || '(none)'] || 0) + 1;
     const _flagged = allMembers.filter(mm => /trent|tranter/i.test(`${mm.firstname} ${mm.surname}`)).map(mm => `${mm.firstname} ${mm.surname} [${mm.status}]`);
 
