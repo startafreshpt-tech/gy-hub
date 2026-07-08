@@ -159,7 +159,12 @@ export default async () => {
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - Number(SYNC_LOOKBACK_DAYS));
 
     const membersResp = await gmGet(`/portal/api/v1/members?api_key=${GYMMASTER_API_KEY}&companyid=${GYMMASTER_COMPANY_ID}`);
-    const members = (membersResp.result || []).filter(m => ACTIVE_STATUSES.includes(m.status));
+    const allMembers = membersResp.result || [];
+    // Process EVERY current member for SESSIONS (so a checked-in session is never
+    // missed because of membership status). Follow-Up/clients stays active-only below.
+    const members = allMembers;
+    const _statusTally = {}; for (const mm of allMembers) _statusTally[mm.status || '(none)'] = (_statusTally[mm.status || '(none)'] || 0) + 1;
+    const _flagged = allMembers.filter(mm => /trent|tranter/i.test(`${mm.firstname} ${mm.surname}`)).map(mm => `${mm.firstname} ${mm.surname} [${mm.status}]`);
 
     for (const m of members) {
       scanned++;
@@ -243,7 +248,7 @@ export default async () => {
             duration_label: (type.match(/\d+\s*min[s]?/i) || [null])[0],
           });
         }
-        await sbUpsert('clients', [{
+        if (ACTIVE_STATUSES.includes(m.status)) await sbUpsert('clients', [{
           gm_member_id: m.id, first_name: m.firstname, surname: m.surname,
           full_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
           email: m.email, status: m.status,
@@ -283,6 +288,7 @@ export default async () => {
     }
 
     await sbWriteBlob('holds-snapshot', JSON.stringify({ updated: new Date().toISOString(), holds: holdsOut }));
+    await sbWriteBlob('debug-members', JSON.stringify({ updated: new Date().toISOString(), total: allMembers.length, statuses: _statusTally, flagged: _flagged }));
     // Coach assignment from booking resources (covers coaching + PT, every trainer).
     const coachById = {}, coachByEmail = {};
     for (const id of Object.keys(coachVotes)) {
