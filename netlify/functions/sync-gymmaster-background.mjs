@@ -67,35 +67,140 @@ function parseCoaching(name){
   return null;
 }
 async function gmGet(path) { return (await fetch(`${GYMMASTER_BASE_URL}${path}`)).json(); }
-// TEMP diagnostic: probe standard_report IDs to find the appointments/attendance report.
+// ---- Appointment scan (staff Reporting API) --------------------------------
+// GymMaster standard report #9 = every booking in a date range, for EVERY member
+// regardless of membership status, with the check-in outcome ("Booking Result").
+// This is the source of truth for 1-on-1 sessions. The member-portal API can't
+// see expired members at all (login fails), which is why people like Matt Trent
+// and Paul Tranter went missing from the invoice. One call per month, not per member.
+const APPT_REPORT_ID = 9;
+const HISTORY_START = '2025-12-01';
+const SYNTH_FLOOR = 1000000000000000;   // synthetic ids sit far above real GM ids (~4e5)
+
 async function gmStdReport(reportId, startDate, endDate) {
-  try {
-    const r = await fetch(`${GYMMASTER_BASE_URL}/api/v2/report/standard_report`, {
-      method: 'POST',
-      headers: { 'X-GM-API-KEY': GYMMASTER_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ report_id: reportId, start_date: startDate, end_date: endDate }),
-    });
-    const status = r.status;
-    let j = null; try { j = await r.json(); } catch { return { id: reportId, status, n: 0 }; }
-    let rows = Array.isArray(j) ? j : (j && j.result !== undefined ? j.result : j);
-    if (rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
-    if (Array.isArray(rows) && rows.length) {
-      return { id: reportId, status, n: rows.length, cols: Object.keys(rows[0] || {}), sample: rows[0] };
-    }
-    return { id: reportId, status, n: 0 };
-  } catch (e) { return { id: reportId, err: String(e).slice(0, 80) }; }
+  const r = await fetch(`${GYMMASTER_BASE_URL}/api/v2/report/standard_report`, {
+    method: 'POST',
+    headers: { 'X-GM-API-KEY': GYMMASTER_API_KEY, 'Content-Type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ report_id: reportId, start_date: startDate, end_date: endDate }),
+  });
+  let j = null; try { j = await r.json(); } catch { return []; }
+  let rows = Array.isArray(j) ? j : (j && j.result !== undefined ? j.result : j);
+  if (rows && !Array.isArray(rows) && typeof rows === 'object') rows = Object.values(rows);
+  return Array.isArray(rows) ? rows : [];
 }
-async function probeReports() {
-  const end = new Date().toISOString().slice(0, 10);
-  const start = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
-  const found = [];
-  const ids = []; for (let i = 1; i <= 500; i++) ids.push(i);
-  const POOL = 8;
-  for (let i = 0; i < ids.length; i += POOL) {
-    const res = await Promise.all(ids.slice(i, i + POOL).map((id) => gmStdReport(id, start, end)));
-    for (const r of res) if (r && r.n > 0) found.push(r);
+
+// "Wickes, Adam" -> "Adam Wickes"
+function flipName(n) {
+  const s = String(n || '').trim();
+  if (!s.includes(',')) return s.replace(/\s+/g, ' ');
+  const [sur, first] = s.split(',');
+  return `${(first || '').trim()} ${(sur || '').trim()}`.replace(/\s+/g, ' ').trim();
+}
+const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11 };
+// "6 Jul 2026" -> "2026-07-06"; falls back to the report's epoch column.
+function apptDate(row) {
+  const m = String(row['Booking Date'] || '').trim().match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})$/);
+  if (m && MONTHS[m[2].toLowerCase()] !== undefined) {
+    const d = new Date(Date.UTC(+m[3], MONTHS[m[2].toLowerCase()], +m[1]));
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
   }
-  await sbWriteBlob('debug-reports', JSON.stringify({ updated: new Date().toISOString(), range: [start, end], count: found.length, found }));
+  const ep = Number(row['sorted_Booking Date']);
+  if (ep > 0) return new Date(ep * 1000).toISOString().slice(0, 10);
+  return null;
+}
+// Deterministic, collision-free id: member + day + start-minute. Report 9 has no booking id.
+function synthId(memberId, dateStr, startSec) {
+  const dayNum = Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 86400000);
+  const startMin = Math.floor(Number(startSec || 0) / 60) % 1440;
+  return Number(memberId) * 100000000 + dayNum * 10000 + startMin;
+}
+// "Showed late" / "Attended" / "Arrived" => checked in.  "No Show" / null => not.
+function isCheckedIn(result) {
+  const t = String(result || '').trim();
+  if (!t) return false;
+  if (/no[\s-]?show/i.test(t)) return false;
+  return /show|attend|arriv|complet|check/i.test(t);
+}
+function durMins(d) {
+  const m = String(d || '').match(/^(\d+):(\d{2})/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// Pull one month at a time so a long history never blows up a single request.
+async function fetchAppointments(startDate, endDate) {
+  const out = [];
+  let cur = new Date(`${startDate}T00:00:00Z`);
+  const stop = new Date(`${endDate}T00:00:00Z`);
+  while (cur <= stop) {
+    const chunkStart = cur.toISOString().slice(0, 10);
+    const nxt = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+    const chunkEnd = (nxt > stop ? stop : new Date(nxt - 86400000)).toISOString().slice(0, 10);
+    try { out.push(...await gmStdReport(APPT_REPORT_ID, chunkStart, chunkEnd)); }
+    catch (e) { console.log('appt chunk failed', chunkStart, String(e).slice(0, 80)); }
+    cur = nxt;
+    await sleep(150);
+  }
+  return out;
+}
+
+// Build 1-on-1 session rows (PT / coaching / discovery) from the appointment feed.
+// Class Name is set for pods & squads — those keep coming from the class schedule.
+function apptRows(raw, cutoffISO) {
+  const rows = []; const seen = new Set(); const resultTally = {}; const skipped = {};
+  for (const r of raw) {
+    const service = String(r.Service || '').trim();
+    const className = r['Class Name'];
+    resultTally[String(r['Booking Result'] || '(none)')] = (resultTally[String(r['Booking Result'] || '(none)')] || 0) + 1;
+    if (className) { skipped.class = (skipped.class || 0) + 1; continue; }
+    const isSales = /discovery|sales\s*(call|meeting)/i.test(service) && !/physio/i.test(service);
+    const isPT = /^\s*PT\b/i.test(service);
+    const isCoaching = /coaching\s*session/i.test(service) && !/squad|\bpod/i.test(service);
+    if (!isPT && !isCoaching && !isSales) { skipped.other = (skipped.other || 0) + 1; continue; }
+    const date = apptDate(r);
+    if (!date || date < cutoffISO) { skipped.old = (skipped.old || 0) + 1; continue; }
+    const memberId = Number(r['Member ID']);
+    if (!memberId) { skipped.nomember = (skipped.nomember || 0) + 1; continue; }
+    const id = synthId(memberId, date, r['sorted_Booking Start Time']);
+    if (seen.has(id)) { skipped.dupe = (skipped.dupe || 0) + 1; continue; }
+    seen.add(id);
+    let kind, billable_minutes;
+    if (isSales) { kind = 'sales'; billable_minutes = classify(service).billable_minutes || 30; }
+    else if (isCoaching) { kind = 'individual'; const mm = service.match(/(\d+)\s*min/i); billable_minutes = mm ? Number(mm[1]) : (classify(service).billable_minutes || 30); }
+    else { ({ kind, billable_minutes } = classify(service)); }
+    if (billable_minutes == null) billable_minutes = durMins(r.Duration);
+    const resource = String(r['Resource Name'] || '').replace(/\s+/g, ' ').trim();
+    rows.push({
+      gm_booking_id: id, gm_member_id: memberId,
+      client_name: flipName(r.Name),
+      trainer_name: parseTrainer(service) || coachFromResource(resource) || coachFromResource(service),
+      trainer_full: resource || null,
+      service_type: service, session_kind: kind, billable_minutes,
+      session_date: date, start_time: r['Booking Start Time'] || null,
+      attended: isCheckedIn(r['Booking Result']), result_text: r['Booking Result'] || null,
+      duration_label: (service.match(/\d+\s*min[s]?/i) || [null])[0] || r.Duration || null,
+    });
+  }
+  return { rows, resultTally, skipped };
+}
+
+async function syncAppointments() {
+  const endDate = new Date().toISOString().slice(0, 10);
+  const raw = await fetchAppointments(HISTORY_START, endDate);
+  const { rows, resultTally, skipped } = apptRows(raw, HISTORY_START);
+  for (let i = 0; i < rows.length; i += 500) await sbUpsert('sessions', rows.slice(i, i + 500), 'gm_booking_id');
+  // Retire the old per-member rows for this window now the appointment feed owns them,
+  // otherwise the same session appears twice (real booking id + synthetic id).
+  if (rows.length) {
+    const q = `session_date=gte.${HISTORY_START}&session_date=lte.${endDate}` +
+      `&gm_booking_id=lt.${SYNTH_FLOOR}&session_kind=in.(individual,sales,couple,onboard)`;
+    await fetch(`${SB}/sessions?${q}`, { method: 'DELETE', headers: sbHeaders({ Prefer: 'return=minimal' }) });
+  }
+  await sbWriteBlob('debug-appointments', JSON.stringify({
+    updated: new Date().toISOString(), range: [HISTORY_START, endDate],
+    raw_rows: raw.length, session_rows: rows.length, booking_results: resultTally, skipped,
+    checked_in: rows.filter(r => r.attended).length,
+  }));
+  return rows.length;
 }
 async function gmPost(path, body) {
   return (await fetch(`${GYMMASTER_BASE_URL}${path}`, {
@@ -173,7 +278,7 @@ export default async () => {
   }
   const log = await sbInsertReturn('sync_log', { status: 'running' });
   const logId = log?.id;
-  try { await probeReports(); } catch (e) { console.log('probe err', e); }
+
 
   const trainers = await sbSelect('trainers', 'select=name,gm_staffid');
   const byStaffId = {}; const names = (trainers || []).map(t => t.name);
@@ -198,6 +303,9 @@ export default async () => {
     const members = allMembers.filter(m => ACTIVE_STATUSES.includes(m.status));
     const _statusTally = {}; for (const mm of allMembers) _statusTally[mm.status || '(none)'] = (_statusTally[mm.status || '(none)'] || 0) + 1;
     const _flagged = allMembers.filter(mm => /trent|tranter/i.test(`${mm.firstname} ${mm.surname}`)).map(mm => `${mm.firstname} ${mm.surname} [${mm.status}]`);
+
+    // One call per month across ALL members (incl. expired) — the appointment scan.
+    try { upserted += await syncAppointments(); } catch (e) { console.log('appointment scan failed:', e); }
 
     for (const m of members) {
       scanned++;
@@ -256,31 +364,7 @@ export default async () => {
         const pifM = (ms || []).find(x => /\bpif\b|onramp|on.?ramp|paid.?in.?full|kick.?start/i.test(x.name || ''));
         let signupCash = null;
         if (pifM) { const mm = String(pifM.name || '').match(/\$([\d,]+(?:\.\d+)?)/); signupCash = mm ? mm[1].replace(/,/g, '') : (pifM.price != null ? String(pifM.price).replace(/[^0-9.]/g, '') : null); }
-        const rows = [];
-        for (const b of past) {
-          const type = b.type || ''; const bname = b.name || ''; const blob = `${type} ${bname}`;
-          const isSales = /discovery|sales\s*(call|meeting)/i.test(blob) && !/physio/i.test(blob);
-          const isPT = /^\s*PT\b/i.test(type);
-          // 1-on-1 coaching sessions are booked as "<Trainer> Coaching Session" (e.g. Laura),
-          // not "PT ..." — capture them too, as billable individual sessions.
-          const isCoaching = /coaching\s*session/i.test(blob) && !/squad|\bpod/i.test(blob);
-          if (!isPT && !isCoaching && !isSales) continue; // pods & squads come from schedule
-          if (!b.day || new Date(b.day) < cutoff) continue;
-          let kind, billable_minutes;
-          if (isSales) { kind = 'sales'; billable_minutes = classify(type).billable_minutes || 30; }
-          else if (isCoaching) { kind = 'individual'; const mm = blob.match(/(\d+)\s*min/i); billable_minutes = mm ? Number(mm[1]) : (classify(type).billable_minutes || 30); }
-          else { ({ kind, billable_minutes } = classify(type)); }
-          rows.push({
-            gm_booking_id: b.id, gm_member_id: m.id,
-            client_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
-            trainer_name: parseTrainer(type) || parseTrainer(b.name) || coachFromResource(b.name) || coachFromResource(type),
-            trainer_full: b.name || b.location || null,
-            service_type: type, session_kind: kind, billable_minutes,
-            session_date: b.day, start_time: b.start_str || b.starttime || null,
-            attended: !!b.attended, result_text: b.resulttext || null,
-            duration_label: (type.match(/\d+\s*min[s]?/i) || [null])[0],
-          });
-        }
+        // Sessions now come from the appointment feed (report #9) — see syncAppointments().
         if (ACTIVE_STATUSES.includes(m.status)) await sbUpsert('clients', [{
           gm_member_id: m.id, first_name: m.firstname, surname: m.surname,
           full_name: `${m.firstname || ''} ${m.surname || ''}`.trim(),
@@ -292,7 +376,6 @@ export default async () => {
           signup_cash: signupCash,
           last_synced: new Date().toISOString(),
         }], 'gm_member_id');
-        if (rows.length) { await sbUpsert('sessions', rows, 'gm_booking_id'); upserted += rows.length; }
         await sleep(40);
       } catch (e) { /* skip member */ }
     }
@@ -346,3 +429,6 @@ export default async () => {
     return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: { 'content-type': 'application/json' } });
   }
 };
+
+// Exported for regression tests (test/appointments.test.mjs).
+export { apptRows, isCheckedIn, synthId, flipName, apptDate, durMins };
