@@ -31,7 +31,8 @@ eq('null when unparseable', apptDate({ 'Booking Date': 'garbage' }), null);
 // ---- synthetic ids -----------------------------------------------------------
 const id1 = synthId(799387, '2026-07-06', 65400);
 eq('id is deterministic', synthId(799387, '2026-07-06', 65400), id1);
-ok('id never collides with real GM booking ids (~4e5)', id1 > 1e12);
+ok('id never collides with real GM booking ids (~4e5)', id1 > 1e8);
+ok('id sits above the synthetic/real boundary (1e8)', id1 > 1e8);
 ok('id stays inside safe integer range', id1 < Number.MAX_SAFE_INTEGER);
 ok('different start times differ', synthId(799387, '2026-07-06', 65400) !== synthId(799387, '2026-07-06', 69000));
 ok('different members differ', synthId(799387, '2026-07-06', 65400) !== synthId(799392, '2026-07-06', 65400));

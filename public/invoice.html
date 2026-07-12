@@ -84,7 +84,8 @@ async function init(){
   if(!cfg.SUPABASE_URL||cfg.SUPABASE_URL.includes('YOUR-PROJECT')){$('#root').innerHTML='<div class="auth"><h2>Setup needed</h2><p>Edit public/config.js.</p></div>';return;}
   const {data}=await sb.auth.getSession();STATE.user=data.session?.user||null;
   if(STATE.user){ const __r=await window.cwGuard(sb,'invoice.html'); if(!__r) return; window.__ROLE=__r; }
-  sb.auth.onAuthStateChange((_e,s)=>{STATE.user=s?.user||null;render();});
+  let _lastUid=STATE.user?.id||null;
+  sb.auth.onAuthStateChange((_e,s)=>{const uid=s?.user?.id||null;if(uid===_lastUid)return;_lastUid=uid;STATE.user=s?.user||null;render();});
   render();
 }
 function renderAuth(){$('#root').innerHTML=`<div class="auth"><h2>🌿 GY Session Reconciliation</h2><p>Sign in to check trainer invoices against GymMaster.</p>
@@ -111,7 +112,8 @@ function render(){
   if(STATE.tab==='coaching')viewCoaching();
   if(STATE.tab==='sync')viewSync();
 }
-function setTab(t){if(STATE.tab==='check'){const a=$('#trn'),b=$('#from'),c=$('#to');if(a&&b&&c)STATE.check={trainer:a.value,from:b.value,to:c.value};}STATE.tab=t;render();}
+function stashCheck(){const a=$('#trn'),b=$('#from'),c=$('#to');if(a&&b&&c)STATE.check={trainer:a.value,from:b.value,to:c.value};}
+function setTab(t){if(STATE.tab==='check')stashCheck();STATE.tab=t;render();}
 async function loadTrainers(){if(!STATE.trainers.length){const{data}=await sb.from('trainers').select('*').eq('active',true).order('is_contractor',{ascending:false}).order('name');STATE.trainers=data||[];}return STATE.trainers;}
 async function loadClientsMap(){if(!STATE.clientsMap){const{data}=await sb.from('clients').select('full_name,membership,lead_source,signup_cash');const m={};for(const c of (data||[])){if(c.full_name)m[c.full_name.toLowerCase()]={membership:c.membership||'',lead:c.lead_source||'',signup:c.signup_cash||''};}STATE.clientsMap=m;}return STATE.clientsMap;}
 function priceFromMembership(p){if(!p)return null;const m=String(p).match(/\$([\d,]+(?:\.\d+)?)/);return m?m[1].replace(/,/g,''):null;}
@@ -133,9 +135,9 @@ async function viewCheck(){
   const trainers=await loadTrainers();
   $('#view').innerHTML=`
    <div class="controls">
-     <div class="field"><label>Trainer</label><select id="trn">${trainers.map(t=>`<option value="${t.name}" ${(STATE.check&&STATE.check.trainer)===t.name?'selected':''}>${t.name}${t.is_contractor?'':' (internal)'}</option>`).join('')}</select></div>
-     <div class="field"><label>Period start</label><input id="from" type="date" value="${(STATE.check&&STATE.check.from)||daysAgo(14)}"></div>
-     <div class="field"><label>Period end</label><input id="to" type="date" value="${(STATE.check&&STATE.check.to)||todayISO()}"></div>
+     <div class="field"><label>Trainer</label><select id="trn" onchange="stashCheck()">${trainers.map(t=>`<option value="${t.name}" ${(STATE.check&&STATE.check.trainer)===t.name?'selected':''}>${t.name}${t.is_contractor?'':' (internal)'}</option>`).join('')}</select></div>
+     <div class="field"><label>Period start</label><input id="from" type="date" onchange="stashCheck()" value="${(STATE.check&&STATE.check.from)||daysAgo(14)}"></div>
+     <div class="field"><label>Period end</label><input id="to" type="date" onchange="stashCheck()" value="${(STATE.check&&STATE.check.to)||todayISO()}"></div>
      <button class="btn" onclick="genExpected()">Generate expected</button>
    </div>
    <div id="out"><div class="note">Pick a contractor and pay period, then <b>Generate expected</b> — the tool builds the invoice GymMaster supports (checked-in 1-on-1s + pods + squads + admin allowance).</div></div>
@@ -224,6 +226,7 @@ function toggleBill(i,el){const e=STATE.expected;if(!e)return;const billed=el?el
 function recomputeInvoice(){const e=STATE.expected;if(!e)return;let sum=0,cnt=0;e._billRows.forEach((r,i)=>{if(!e._excluded.has(i)){sum+=rowAmtG(r,e.rate);cnt++;}});sum+=Number(e._adminEx||0);const holiday=e.isEmp?sum*(e.holPct||0):0;const grand=(e.gstable?sum*(1+GST):sum)+holiday;e.holiday=holiday;e.total=grand;e.totalEx=sum;const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};set('liveTotal',money(grand));set('expTotal',money(grand));set('billCount',cnt);STATE.outHTML=document.getElementById('out').innerHTML;renderCompare();}
 
 async function genExpected(){
+  stashCheck();
   const trainer=$('#trn').value,from=$('#from').value,to=$('#to').value;
   $('#out').innerHTML='<div class="loading"><div class="spinner"></div>Building expected invoice…</div>';
   const tr=STATE.trainers.find(t=>t.name===trainer)||{};

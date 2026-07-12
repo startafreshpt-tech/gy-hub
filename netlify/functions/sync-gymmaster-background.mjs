@@ -75,7 +75,7 @@ async function gmGet(path) { return (await fetch(`${GYMMASTER_BASE_URL}${path}`)
 // and Paul Tranter went missing from the invoice. One call per month, not per member.
 const APPT_REPORT_ID = 9;
 const HISTORY_START = '2025-12-01';
-const SYNTH_FLOOR = 1000000000000000;   // synthetic ids sit far above real GM ids (~4e5)
+const SYNTH_FLOOR = 100000000;   // 1e8: real GM booking ids are ~4e5; synthetic ids start ~7e14
 
 async function gmStdReport(reportId, startDate, endDate) {
   const r = await fetch(`${GYMMASTER_BASE_URL}/api/v2/report/standard_report`, {
@@ -110,9 +110,11 @@ function apptDate(row) {
 }
 // Deterministic, collision-free id: member + day + start-minute. Report 9 has no booking id.
 function synthId(memberId, dateStr, startSec) {
-  const dayNum = Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 86400000);
-  const startMin = Math.floor(Number(startSec || 0) / 60) % 1440;
-  return Number(memberId) * 100000000 + dayNum * 10000 + startMin;
+  const dayNum = Math.floor(Date.parse(`${dateStr}T00:00:00Z`) / 86400000); // < 2.1e4
+  const startMin = Math.floor(Number(startSec || 0) / 60) % 1440;           // < 1e4
+  // memberId*1e9 gives every member a decade-wide slot (day*1e4 + startMin < 1e9),
+  // so ids never collide across members and stay < MAX_SAFE_INTEGER for 6-7 digit ids.
+  return Number(memberId) * 1000000000 + dayNum * 10000 + startMin;
 }
 // "Showed late" / "Attended" / "Arrived" => checked in.  "No Show" / null => not.
 function isCheckedIn(result) {
