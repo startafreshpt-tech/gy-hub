@@ -189,7 +189,17 @@ async function syncAppointments() {
   const endDate = new Date().toISOString().slice(0, 10);
   const raw = await fetchAppointments(HISTORY_START, endDate);
   const { rows, resultTally, skipped } = apptRows(raw, HISTORY_START);
-  for (let i = 0; i < rows.length; i += 500) await sbUpsert('sessions', rows.slice(i, i + 500), 'gm_booking_id');
+  // Upsert in batches, capturing any PostgREST error text (a single bad row rejects
+  // the whole batch, so silent failures here must never go unnoticed again).
+  const upsertErrors = [];
+  for (let i = 0; i < rows.length; i += 500) {
+    const batch = rows.slice(i, i + 500);
+    const resp = await fetch(`${SB}/sessions?on_conflict=gm_booking_id`, {
+      method: 'POST', headers: sbHeaders({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify(batch),
+    });
+    if (!resp.ok) upsertErrors.push({ at: i, status: resp.status, body: (await resp.text().catch(() => '')).slice(0, 300) });
+  }
   // Retire the old per-member rows for this window now the appointment feed owns them,
   // otherwise the same session appears twice (real booking id + synthetic id).
   if (rows.length) {
@@ -201,6 +211,8 @@ async function syncAppointments() {
     updated: new Date().toISOString(), range: [HISTORY_START, endDate],
     raw_rows: raw.length, session_rows: rows.length, booking_results: resultTally, skipped,
     checked_in: rows.filter(r => r.attended).length,
+    upsert_errors: upsertErrors,
+    inserted: rows.length - upsertErrors.reduce((n, e) => n + 500, 0),
   }));
   return rows.length;
 }
