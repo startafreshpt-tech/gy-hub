@@ -78,6 +78,8 @@ const ADMIN_CAP={Caron:1.0,Ethan:2.5,Laura:1.5,Natalie:1.5};
 const GST_TRAINERS=['Gavyn','Ethan']; const GST=0.15; // Scott salaried; Laura casual employee; Caron not GST-registered (all no GST)
 const EMPLOYEES=['Laura']; const HOLIDAY_PCT=0.08; // casual employees: 8% holiday pay, no GST
 const CASELOAD={Gavyn:64,Scott:91,Caron:6,Ethan:49,Laura:22,Natalie:24}; // current Trainerize client numbers
+function toMin(t){const m=String(t||'').trim().match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]m)?/i);if(!m)return 'x'+String(t||'');let h=+m[1];const mn=+m[2];const ap=(m[3]||'').toLowerCase();if(ap==='pm'&&h!==12)h+=12;if(ap==='am'&&h===12)h=0;return h*60+mn;}
+function natKey(s){return (s.client_name||'').trim().toLowerCase()+'|'+s.session_date+'|'+toMin(s.start_time)+'|'+s.session_kind+'|'+(Number(s.billable_minutes)||0);}
 let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
 
 async function init(){
@@ -122,8 +124,8 @@ async function loadAllocation(){
   if(STATE.alloc) return STATE.alloc;
   const {data:cli}=await sb.from('clients').select('full_name,coach_weeks,coach_count,membership_start').not('coach_count','is',null);
   let all=[],from=0;
-  for(;;){const {data}=await sb.from('sessions').select('client_name,session_date').in('session_kind',['individual','onboard','couple']).range(from,from+999);if(!data||!data.length)break;all=all.concat(data);if(data.length<1000)break;from+=1000;}
-  const byName={};for(const s of all){const n=(s.client_name||'').toLowerCase();if(!n)continue;const b=byName[n]||(byName[n]={count:0,first:s.session_date});b.count++;if(s.session_date&&(!b.first||s.session_date<b.first))b.first=s.session_date;}
+  for(;;){const {data}=await sb.from('sessions').select('client_name,session_date,start_time,session_kind,billable_minutes').in('session_kind',['individual','onboard','couple']).range(from,from+999);if(!data||!data.length)break;all=all.concat(data);if(data.length<1000)break;from+=1000;}
+  const seen=new Set();const byName={};for(const s of all){const n=(s.client_name||'').toLowerCase();if(!n)continue;const k=natKey(s);if(seen.has(k))continue;seen.add(k);const b=byName[n]||(byName[n]={count:0,first:s.session_date});b.count++;if(s.session_date&&(!b.first||s.session_date<b.first))b.first=s.session_date;}
   const today=new Date();const map={};
   for(const c of (cli||[])){const n=(c.full_name||'').toLowerCase();const d=byName[n]||{count:0,first:null};const start=c.membership_start||d.first;if(!start)continue;const wks=Math.max(0,(today-new Date(start))/6048e5);const cw=Number(c.coach_weeks)||1,cc=Number(c.coach_count)||1;const allocated=Math.floor(wks/cw)*cc;map[n]={name:c.full_name,delivered:d.count,allocated,cw,cc,weeks:Math.round(wks)};}
   STATE.alloc=map;return map;
@@ -156,7 +158,7 @@ function weeksBetween(from,to){const d=(new Date(to)-new Date(from))/86400000+1;
 // ── Generate a downloadable invoice spreadsheet in the trainer's template layout ──
 function fmtName(n){const p=String(n||'').trim().split(/\s+/);if(p.length<2)return n||'';return p[p.length-1]+', '+p.slice(0,-1).join(' ');}
 function buildInvoiceAOA(S, trainer, from, to, rate, gstable, excludedSigs){
-  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
+  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=natKey(s);if(seen.has(k))return false;seen.add(k);return true;});};
   const grp=s=>{ if(s.session_kind==='squad')return 'sqd'; if(s.session_kind==='pod')return 'pod'; if(s.session_kind==='sales')return 'sales';
     if(['individual','onboard','couple'].includes(s.session_kind)){const m=Number(s.billable_minutes||0);if(m<=30)return 'm30';if(m<=45)return 'm45';return 'm60';} return null; };
   const sigOf=s=>`${s.session_date}|${s.start_time||''}|${s.session_kind}|${s.client_name||''}`;
@@ -238,7 +240,7 @@ async function genExpected(){
   const S=sess||[];
   const {data:manual}=await sb.from('manual_sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
   (manual||[]).forEach(ms=>S.push({session_date:ms.session_date,client_name:ms.client_name,session_kind:ms.session_kind||'individual',billable_minutes:ms.billable_minutes,attended:true,start_time:'',service_type:'(manual) '+ms.client_name,gm_booking_id:'manual-'+ms.id}));
-  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=s.session_date+'|'+(s.start_time||'')+'|'+s.session_kind;if(seen.has(k))return false;seen.add(k);return true;});};
+  const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=natKey(s);if(seen.has(k))return false;seen.add(k);return true;});};
   const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind));
   const isGavynClient=s=>/\bgavyn\b/i.test(s.client_name||'');
   const oneAttDed=dedupe(oneRows.filter(s=>s.attended||isGavynClient(s))), oneAllDed=dedupe(oneRows); // Gavyn-as-client counts even if not checked in
