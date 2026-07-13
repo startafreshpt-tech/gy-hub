@@ -116,12 +116,11 @@ function synthId(memberId, dateStr, startSec) {
   // so ids never collide across members and stay < MAX_SAFE_INTEGER for 6-7 digit ids.
   return Number(memberId) * 1000000000 + dayNum * 10000 + startMin;
 }
-// "Showed late" / "Attended" / "Arrived" => checked in.  "No Show" / null => not.
+// Per the studio's billing rule, ONLY "Showed" and "Showed late" count as a
+// delivered/billable session. Everything else -- "Booking" (never marked),
+// "No show", "Cancelled no Charge", blank -- does not bill.
 function isCheckedIn(result) {
-  const t = String(result || '').trim();
-  if (!t) return false;
-  if (/no[\s-]?show/i.test(t)) return false;
-  return /show|attend|arriv|complet|check/i.test(t);
+  return /^\s*showed\b/i.test(String(result || ''));
 }
 function durMins(d) {
   const m = String(d || '').match(/^(\d+):(\d{2})/);

@@ -9,9 +9,12 @@ const eq = (name, a, b) => ok(`${name} (got ${JSON.stringify(a)}, want ${JSON.st
 
 // ---- check-in interpretation -------------------------------------------------
 eq('showed late counts as checked in', isCheckedIn('Showed late'), true);
-eq('attended counts', isCheckedIn('Attended'), true);
-eq('arrived counts', isCheckedIn('Arrived'), true);
-eq('checked in counts', isCheckedIn('Checked In'), true);
+eq('generic Attended does NOT count (only Showed*)', isCheckedIn('Attended'), false);
+eq('Arrived does NOT count', isCheckedIn('Arrived'), false);
+eq('Checked In does NOT count', isCheckedIn('Checked In'), false);
+eq('plain Showed counts', isCheckedIn('Showed'), true);
+eq('Booking does not count', isCheckedIn('Booking'), false);
+eq('Cancelled no Charge does not count', isCheckedIn('Cancelled no Charge'), false);
 eq('no show does not count', isCheckedIn('No Show'), false);
 eq('no-show hyphen does not count', isCheckedIn('no-show'), false);
 eq('noshow does not count', isCheckedIn('Noshow'), false);
@@ -63,7 +66,7 @@ const CUT = '2025-12-01';
 
 // Expired members are exactly why this feed exists — Matt Trent must come through.
 {
-  const { rows } = apptRows([row({ 'Member ID': 700001, Name: 'Trent, Matt', 'Booking Date': '3 Jun 2026', Service: 'PT Gavyn 45 Mins', 'Booking Result': 'Attended' })], CUT);
+  const { rows } = apptRows([row({ 'Member ID': 700001, Name: 'Trent, Matt', 'Booking Date': '3 Jun 2026', Service: 'PT Gavyn 45 Mins', 'Booking Result': 'Showed' })], CUT);
   eq('expired member captured', rows.length, 1);
   eq('expired member attended', rows[0].attended, true);
   eq('expired member name', rows[0].client_name, 'Matt Trent');
