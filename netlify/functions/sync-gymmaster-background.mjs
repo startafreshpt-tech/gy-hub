@@ -146,8 +146,18 @@ async function fetchAppointments(startDate, endDate) {
 
 // Build 1-on-1 session rows (PT / coaching / discovery) from the appointment feed.
 // Class Name is set for pods & squads — those keep coming from the class schedule.
+// When a slot has been cancelled then re-booked/checked-in, GymMaster keeps BOTH
+// booking records, so report #9 returns two rows for the same member+date+time.
+// Rank results so we always keep the one that reflects reality: a "Showed" beats a
+// bare "Booking", which beats a "No show"/"Cancelled".
+function resultRank(result) {
+  const t = String(result || '').toLowerCase();
+  if (/^\s*showed/.test(t)) return 3;      // Showed / Showed late -> attended
+  if (/no[\s-]?show|cancel/.test(t)) return 0;
+  return 1;                                // "Booking" (unmarked) and anything else
+}
 function apptRows(raw, cutoffISO) {
-  const rows = []; const seen = new Set(); const resultTally = {}; const skipped = {};
+  const byId = new Map(); const resultTally = {}; const skipped = {};
   for (const r of raw) {
     const service = String(r.Service || '').trim();
     const className = r['Class Name'];
@@ -162,15 +172,16 @@ function apptRows(raw, cutoffISO) {
     const memberId = Number(r['Member ID']);
     if (!memberId) { skipped.nomember = (skipped.nomember || 0) + 1; continue; }
     const id = synthId(memberId, date, r['sorted_Booking Start Time']);
-    if (seen.has(id)) { skipped.dupe = (skipped.dupe || 0) + 1; continue; }
-    seen.add(id);
+    const existing = byId.get(id);
+    if (existing && resultRank(existing.result_text) >= resultRank(r['Booking Result'])) { skipped.dupe = (skipped.dupe || 0) + 1; continue; }
+    if (existing) skipped.dupe = (skipped.dupe || 0) + 1;   // replacing a weaker duplicate
     let kind, billable_minutes;
     if (isSales) { kind = 'sales'; billable_minutes = classify(service).billable_minutes || 30; }
     else if (isCoaching) { kind = 'individual'; const mm = service.match(/(\d+)\s*min/i); billable_minutes = mm ? Number(mm[1]) : (classify(service).billable_minutes || 30); }
     else { ({ kind, billable_minutes } = classify(service)); }
     if (billable_minutes == null) billable_minutes = durMins(r.Duration);
     const resource = String(r['Resource Name'] || '').replace(/\s+/g, ' ').trim();
-    rows.push({
+    byId.set(id, {
       gm_booking_id: id, gm_member_id: memberId,
       client_name: flipName(r.Name),
       trainer_name: parseTrainer(service) || coachFromResource(resource) || coachFromResource(service),
@@ -181,6 +192,7 @@ function apptRows(raw, cutoffISO) {
       duration_label: (service.match(/\d+\s*min[s]?/i) || [null])[0] || r.Duration || null,
     });
   }
+  const rows = [...byId.values()];
   return { rows, resultTally, skipped };
 }
 

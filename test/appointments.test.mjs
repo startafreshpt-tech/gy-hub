@@ -118,6 +118,28 @@ const CUT = '2025-12-01';
   eq('unmarked booking not attended', rows[0].attended, false);
 }
 
+// Cancelled-then-rebooked: GymMaster returns two rows for the same slot. We must
+// keep the "Showed" one regardless of order, so the checked-in session bills.
+{
+  const cancelled = row({ 'Booking Result': 'Cancelled no Charge' });
+  const showed = row({ 'Booking Result': 'Showed late' });
+  let out = apptRows([cancelled, showed], CUT);
+  eq('cancelled-then-showed -> one row', out.rows.length, 1);
+  eq('cancelled-then-showed -> attended', out.rows[0].attended, true);
+  eq('cancelled-then-showed -> keeps Showed', out.rows[0].result_text, 'Showed late');
+  out = apptRows([showed, cancelled], CUT);
+  eq('showed-then-cancelled -> one row', out.rows.length, 1);
+  eq('showed-then-cancelled -> attended', out.rows[0].attended, true);
+  eq('showed-then-cancelled -> keeps Showed', out.rows[0].result_text, 'Showed late');
+}
+// Booking (unmarked) beats a Cancelled duplicate, but neither is attended.
+{
+  const out = apptRows([row({ 'Booking Result': 'Cancelled no Charge' }), row({ 'Booking Result': 'Booking' })], CUT);
+  eq('cancelled+booking -> one row', out.rows.length, 1);
+  eq('cancelled+booking -> keeps Booking', out.rows[0].result_text, 'Booking');
+  eq('cancelled+booking -> not attended', out.rows[0].attended, false);
+}
+
 // Duplicates would double-bill.
 {
   const { rows } = apptRows([row({}), row({})], CUT);
