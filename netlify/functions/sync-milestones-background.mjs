@@ -11,7 +11,7 @@ const SB_URL   = process.env.SUPABASE_URL;
 const SB_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE='https://api.trainerize.com/v03';
 const AUTH='Basic '+Buffer.from(`${GROUP_ID}:${TOKEN}`).toString('base64');
-const POOL=6, LB2KG=0.45359237, WIN=45;
+const POOL=4, LB2KG=0.45359237, WIN=45;
 const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 const iso=d=>d.toISOString().slice(0,10);
 const today=iso(TODAY);
@@ -47,17 +47,31 @@ const round1=x=>x==null?null:Math.round(x*10)/10;
 function clampBW(a){const lo=35/0.45359237,hi=250/0.45359237,bad=x=>x!=null&&(x<lo||x>hi);if(bad(a.first_bw_lb)||bad(a.bw_now_lb)){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}if(a.first_bw_lb!=null&&a.bw_now_lb!=null){const ch=Math.abs((a.first_bw_lb-a.bw_now_lb)*0.45359237);if(ch>60){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}}}
 const num=x=>{const n=Number(x);return Number.isFinite(n)?n:null;};
 const WT=new Set(['oneRepMax','threeRepMax','fiveRepMax','tenRepMax','maxWeight','maxLoad']);
-function extractAccomplishments(stats){let pr=0,mil=0,habit_cnt=0,habit_tot=0,max_streak=0,rdg=false;const names=new Set();const srecs=[];
+function extractAccomplishments(stats){let pr=0,mil=0,milMax=0,habit_cnt=0,habit_tot=0,max_streak=0,rdg=false;const names=new Set();const srecs=[];
   for(const s of(stats||[])){const cat=s.category,type=s.type,dd=s.data||{};
     if(cat==='workoutBrokenRecord'){pr++;if(WT.has(type)&&dd.unit==='kg')srecs.push({ex:dd.exerciseName,type,val:dd.data,chg:dd.dataChange,date:(s.itemDate||'').slice(0,10)});}
-    else if(cat==='workoutMilestone')mil++;
+    else if(cat==='workoutMilestone'){mil++;
+      // Trainerize awards a badge at 500/600/.../1000 workouts. That badge is the
+      // studio's source of truth for the clubs, and it can exceed the API's
+      // workoutsTotal (Desley: badge 1000 vs workoutsTotal 977). Read the value
+      // defensively across the plausible fields so a schema tweak can't lose it.
+      for(const cand of [dd.data,dd.milestone,dd.count,dd.value,dd.number,dd.total,s.total]){
+        const n=Number(cand); if(Number.isFinite(n)&&n>=50&&n<=100000) milMax=Math.max(milMax,n);
+      }
+      if(!globalThis.__milSample) globalThis.__milSample=JSON.stringify(s).slice(0,400);
+    }
     else if(cat==='goalHabit'&&type==='habit'){habit_cnt++;habit_tot+=(s.total||0);max_streak=Math.max(max_streak,dd.streak||0);const nm=(dd.name||'').trim();names.add(nm);if(/read/i.test(nm)&&/goal/i.test(nm))rdg=true;}}
-  return{pr,mil,srecs,habit:{habit_cnt,habit_tot,max_streak,n_habits:names.size,read_daily_goals:rdg}};}
+  return{pr,mil,milMax,srecs,habit:{habit_cnt,habit_tot,max_streak,n_habits:names.size,read_daily_goals:rdg}};}
 async function getActive(){const all=[];for(let start=0;;start+=200){const d=await api('/user/getList',{start,count:200});const u=(d&&d.users)||[];all.push(...u);if(u.length<200)break;}return all;}
 async function processActive(m){const uid=m.id;const created=parseD(m.created)||new Date('2016-01-01');
   const start=iso(created<new Date('2015-01-01')?new Date('2015-01-01'):created);
   const wDates=[],cDates=[],bDates=[];
+  // A throttled call returns {_http}/{_err}/null, which used to be indistinguishable
+  // from "this member has no workouts" -- that is how Sharron Booth came back as all
+  // zeros and dropped off every board. Flag it so the member can be retried.
+  let fetchFailed=false;
   for(const[cs,ce]of chunks(start,today)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});
+    if(!d||d._err||d._http||!('calendar' in d)){fetchFailed=true;continue;}
     for(const day of(d&&d.calendar)||[])for(const it of day.items||[]){if(it.type==='workoutRegular'&&it.status==='tracked')wDates.push(day.date);else if(it.type==='cardio'&&it.status==='tracked')cDates.push(day.date);else if(it.type==='bodyStat')bDates.push(day.date);}}
   const cntSince=(arr,c)=>arr.filter(x=>x>=c).length;
   const bs=[...new Set(bDates.filter(parseD))].sort();
@@ -73,9 +87,9 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   let ytd=null,mtd=null;
   if(dt_now&&bw_now!=null){if(dt_now>=jan1){const b=await baseline(jan1);if(b!=null)ytd=round1((b-bw_now)*LB2KG);}if(dt_now>=monthStart){const b=await baseline(monthStart);if(b!=null)mtd=round1((b-bw_now)*LB2KG);}}
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const ex=extractAccomplishments(acc&&acc.stats);const yA=parseD(m.created);
-  return{id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:wDates.length,activities:cDates.length,combined:wDates.length+cDates.length,
+  return{_failed:fetchFailed,id:uid,name:m.name,created:(m.created||'').slice(0,10),status:'active',lifetime:wDates.length,activities:cDates.length,combined:wDates.length+cDates.length,
     month:cntSince(wDates,monthStart),d30:cntSince(wDates,d30),act_month:cntSince(cDates,monthStart),act_30d:cntSince(cDates,d30),
-    last_workout:wDates.length?wDates.sort().slice(-1)[0]:null,pr:ex.pr,mil:ex.mil,wt_loss_kg:wt_loss,measure_age:age,bf_now:num(bf_now),
+    last_workout:wDates.length?wDates.sort().slice(-1)[0]:null,pr:ex.pr,mil:ex.mil,mil_badge:ex.milMax||0,wt_loss_kg:wt_loss,measure_age:age,bf_now:num(bf_now),
     tenure_years:yA?Math.round((TODAY-yA)/864e5/365.25*10)/10:null,ytd_loss:ytd,mtd_loss:mtd,
     bw_now_lb:bw_now,bw_prev_lb:bw_prev,bs_date_now:dt_now,bs_date_prev:dt_prev,first_bw_lb:first_bw,first_date,
     waist_now:num(waist_now),waist_first:num(waist_first),_srecs:ex.srecs,_habit:ex.habit};}
@@ -119,12 +133,28 @@ function lookupMembership(name,map){
 async function buildDATA(){
   const membershipMap=await loadMembershipMap();
   const activeRaw=await getActive();const active=await pool(activeRaw,processActive);
+  // Retry anyone whose calendar fetch was throttled, one at a time with breathing
+  // room. Without this a rate-limited member silently reports zero of everything.
+  let calRetried=0, calStillFailed=0;
+  for(let i=0;i<active.length;i++){
+    if(!active[i]||!active[i]._failed) continue;
+    await sleep(500);
+    calRetried++;
+    try{
+      const again=await processActive(activeRaw[i]);
+      if(again&&!again._failed) active[i]=again; else calStillFailed++;
+    }catch(e){ calStillFailed++; }
+  }
   // Authoritative lifetime/activity totals in a SEPARATE low-concurrency pass.
   // getClientSummary is reliable alone but Trainerize rate-limits (429) when it's
   // mixed into the heavy per-member pool — which had emptied the 1000 Club.
+  const summaryFails=[];
   await pool(active, async(a)=>{
     const summ=await api('/user/getClientSummary',{userID:a.id,unitWeight:'kg'});
     const sR=(summ&&summ.Response)||(summ&&summ.result)||summ||{};
+    // A throttled/failed call has no workoutsTotal. Record it rather than letting
+    // the member silently keep 0 and vanish from the clubs.
+    if(!Number.isFinite(sR.workoutsTotal)) summaryFails.push({id:a.id,name:a.name});
     if(Number.isFinite(sR.workoutsTotal)) a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
     if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
     a.combined=(a.lifetime||0)+(a.activities||0);
@@ -141,6 +171,22 @@ async function buildDATA(){
     }
     clampBW(a);
   }, 5);
+  // Retry any throttled summary calls serially with breathing room, so a burst of
+  // 429s doesn't cost us a member's lifetime total.
+  if(summaryFails.length){
+    const byId={}; for(const a of active) byId[a.id]=a;
+    for(const f of summaryFails.slice()){
+      await sleep(400);
+      const summ=await api('/user/getClientSummary',{userID:f.id,unitWeight:'kg'},4);
+      const sR=(summ&&summ.Response)||(summ&&summ.result)||summ||{};
+      const a=byId[f.id]; if(!a) continue;
+      if(Number.isFinite(sR.workoutsTotal)){
+        a.lifetime=Math.max(a.lifetime||0, sR.workoutsTotal);
+        if(Number.isFinite(sR.cardioTotal)) a.activities=Math.max(a.activities||0, sR.cardioTotal);
+        summaryFails.splice(summaryFails.findIndex(x=>x.id===f.id),1);
+      }
+    }
+  }
   // WEIGHT HISTORY — a SEPARATE, gentle low-concurrency pass. The month-by-month
   // /bodystats/get probes are heavy, so they run AFTER the totals above are safely
   // computed and can never throttle the 1000 Club.
@@ -171,9 +217,27 @@ async function buildDATA(){
     delete a._bsA;
   }, 2);
   const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
+  const PREV=await loadPrevTotals();
+  let floorBadge=0, floorPrev=0;
+  for(const a of active){
+    const p=PREV[a.id]||{};
+    const lifeFloor=Math.max(Number(a.mil_badge)||0, Number(p.lifetime)||0);
+    if((Number(a.mil_badge)||0) > (a.lifetime||0)) floorBadge++;
+    if((Number(p.lifetime)||0) > (a.lifetime||0)) floorPrev++;
+    a.lifetime=Math.max(a.lifetime||0, lifeFloor);
+    a.activities=Math.max(a.activities||0, Number(p.activities)||0);
+    a.combined=(a.lifetime||0)+(a.activities||0);
+  }
+  globalThis.__dbgSumm={generated:new Date().toISOString(),active:active.length,
+    calendar_retried:calRetried,calendar_still_failed:calStillFailed,
+    summary_failed_after_retry:summaryFails.length,failed_sample:summaryFails.slice(0,10),
+    raised_by_badge:floorBadge,raised_by_prev_snapshot:floorPrev,
+    zero_lifetime:active.filter(a=>!(a.lifetime>0)).length,
+    club1000:active.filter(a=>(a.lifetime||0)>=1000).length,
+    milestone_sample:globalThis.__milSample||null};
   const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const l=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(l>0) alltime=l;}
     const wl=(a.wt_loss_kg>0)?a.wt_loss_kg:null;
-    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,wt_loss_kg:wl,measure_age:(wl!=null?a.measure_age:null),bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
+    return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,mil_badge:a.mil_badge||0,wt_loss_kg:wl,measure_age:(wl!=null?a.measure_age:null),bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
   const allLoss=[];for(const a of active){if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);allLoss.push({name:a.name,kg,first:round1(a.first_bw_lb*LB2KG),last:round1(a.bw_now_lb*LB2KG)});}}
   const losers=allLoss.filter(r=>saneWt(r.first,r.last,r.kg));
   const waist=[];for(const a of active){if(a.waist_first!=null&&a.waist_now!=null&&a.waist_first>0&&a.waist_now>0)waist.push(round1(a.waist_first-a.waist_now));}const waist_lo=waist.filter(w=>w>0);
@@ -226,6 +290,22 @@ async function buildDATA(){
   const byLife=(lo,hi)=>members.filter(m=>m.lifetime>=lo&&(hi==null||m.lifetime<hi)).sort((a,b)=>b.lifetime-a.lifetime);
   const clubs={club1000:byLife(1000,null),club400:byLife(400,1000),club200:byLife(200,400),club100:byLife(100,200),near1000:byLife(800,1000),near400:byLife(300,400)};
   return{summary,members,leaderboard,clubs};
+}
+// Workout counts only ever go UP. If a run is throttled and comes back short (or
+// zero), taking the max against the last good snapshot means a rate-limited sync
+// can never silently empty the clubs again.
+async function loadPrevTotals(){
+  try{
+    const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`};
+    const r=await fetch(`${SB_URL}/rest/v1/invoices?source=eq.milestones-snapshot&select=raw_text&order=created_at.desc&limit=1`,{headers:H});
+    const j=await r.json(); const raw=Array.isArray(j)&&j[0]&&j[0].raw_text;
+    if(!raw) return {};
+    const prev=JSON.parse(raw); const map={};
+    for(const m of (prev.members||[])){
+      if(m&&m.id!=null) map[m.id]={lifetime:Number(m.lifetime)||0,activities:Number(m.activities)||0};
+    }
+    return map;
+  }catch(e){ return {}; }
 }
 async function sbWrite(dataStr){
   const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
