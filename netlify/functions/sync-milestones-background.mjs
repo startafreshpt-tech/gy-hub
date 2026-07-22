@@ -5,6 +5,7 @@
 // Secrets from Netlify env: TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN,
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // ============================================================================
+import { mergeSnapshot, topTransformations, auditSnapshot } from './_snapshot-guard.mjs';
 const GROUP_ID = process.env.TRAINERIZE_GROUP_ID;
 const TOKEN    = process.env.TRAINERIZE_API_TOKEN;
 const SB_URL   = process.env.SUPABASE_URL;
@@ -243,9 +244,16 @@ async function buildDATA(){
     zero_lifetime:active.filter(a=>!(a.lifetime>0)).length,
     club1000:active.filter(a=>(a.lifetime||0)>=1000).length,
     milestone_sample:globalThis.__milSample||null};
-  const members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const l=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(l>0) alltime=l;}
+  let members=active.map(a=>{let alltime=null;if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const l=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG); if(l>0) alltime=l;}
     const wl=(a.wt_loss_kg>0)?a.wt_loss_kg:null;
     return{id:a.id,name:a.name,created:a.created,lifetime:a.lifetime,activities:a.activities,combined:a.combined,month:a.month,d30:a.d30,act_month:a.act_month,act_30d:a.act_30d,last_workout:a.last_workout,pr:a.pr,mil:a.mil,mil_badge:a.mil_badge||0,wt_loss_kg:wl,measure_age:(wl!=null?a.measure_age:null),bf_now:a.bf_now,tenure_years:a.tenure_years,ytd_loss:a.ytd_loss,mtd_loss:a.mtd_loss,alltime_loss_kg:alltime,plan:lookupMembership(a.name,membershipMap),price:lookupMembership(a.name,membershipMap),gm_status:null};});
+  // GUARD: nothing is published that is impossibly worse than the last good run.
+  const PREVSNAP=await loadPrevSnapshot();
+  const _mg=mergeSnapshot({members},PREVSNAP);
+  members=_mg.members;
+  globalThis.__dbgSumm.carried_forward=_mg.carried.length;
+  globalThis.__dbgSumm.carried_sample=_mg.carried.slice(0,15);
+  globalThis.__dbgSumm.alerts=auditSnapshot({members},PREVSNAP,globalThis.__dbgSumm);
   const allLoss=[];for(const a of active){if(a.first_bw_lb!=null&&a.bw_now_lb!=null&&a.first_date&&a.first_date!==a.bs_date_now){const kg=round1((a.first_bw_lb-a.bw_now_lb)*LB2KG);allLoss.push({name:a.name,kg,first:round1(a.first_bw_lb*LB2KG),last:round1(a.bw_now_lb*LB2KG)});}}
   const losers=allLoss.filter(r=>saneWt(r.first,r.last,r.kg));
   const waist=[];for(const a of active){if(a.waist_first!=null&&a.waist_now!=null&&a.waist_first>0&&a.waist_now>0)waist.push(round1(a.waist_first-a.waist_now));}const waist_lo=waist.filter(w=>w>0);
@@ -282,13 +290,13 @@ async function buildDATA(){
   const pl=hr.filter(r=>r.loss!=null);
   const habit={tiers,r_loss:pearson(pl.map(r=>r.eng),pl.map(r=>r.loss)),n_loss:pl.length,uses_pct:hr.length?Math.round(100*hr.filter(r=>r.cnt>0).length/hr.length):0,total:hr.length,scatter:pl.map(r=>({x:Math.min(r.eng,40),y:r.loss,a:r.act}))};
   const sum=arr=>arr.reduce((a,b)=>a+b,0);
-  const summary={generated:today,total_members:members.length,active_this_month:members.filter(m=>m.month>0).length,act_active_this_month:members.filter(m=>m.act_month>0).length,
+  const summary={generated:today,health:globalThis.__dbgSumm||null,total_members:members.length,active_this_month:members.filter(m=>m.month>0).length,act_active_this_month:members.filter(m=>m.act_month>0).length,
     workouts_month:sum(members.map(m=>m.month)),workouts_month_target:600,workouts_30d:sum(members.map(m=>m.d30)),workouts_alltime:sum(members.map(m=>m.lifetime)),
     activities_month:sum(members.map(m=>m.act_month)),activities_30d:sum(members.map(m=>m.act_30d)),activities_alltime:sum(members.map(m=>m.activities)),
     total_pr:sum(members.map(m=>m.pr)),total_mil:sum(members.map(m=>m.mil)),bodyfat_target:700,window_days:WIN,
     wt_net_kg:Math.round(sum(win.map(m=>m.wt_loss_kg))*10)/10,wt_lossonly_kg:Math.round(sum(win.filter(m=>m.wt_loss_kg>0).map(m=>m.wt_loss_kg))*10)/10,wt_window_members:win.length,
     bf_net_kg:0.0,bf_logging_members:members.filter(m=>m.bf_now!=null).length,
-    at_lost_kg:aLost,at_losers:losers.length,at_avg:Math.round(aLost/Math.max(1,losers.length)*10)/10,at_pair_members:allLoss.length,at_top:[...losers].sort((a,b)=>b.kg-a.kg).slice(0,10).map(r=>({name:r.name,kg:r.kg})),
+    at_lost_kg:aLost,at_losers:losers.length,at_avg:Math.round(aLost/Math.max(1,losers.length)*10)/10,at_pair_members:allLoss.length,at_top:topTransformations(members),
     biz_lost:bizLost,biz_losers:bizLosers,biz_people:bizLosers,biz_avg:bizLosers?Math.round(bizLost/bizLosers*10)/10:null,
     deact_lost:dLost,deact_losers:dLosers.length,deact_top:deactTop,
     waist_lost_cm:Math.round(sum(waist_lo)),waist_losers:waist_lo.length,waist_pairs:waist.length,
@@ -302,6 +310,14 @@ async function buildDATA(){
 // Workout counts only ever go UP. If a run is throttled and comes back short (or
 // zero), taking the max against the last good snapshot means a rate-limited sync
 // can never silently empty the clubs again.
+async function loadPrevSnapshot(){
+  try{
+    const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`};
+    const r=await fetch(`${SB_URL}/rest/v1/invoices?source=eq.milestones-snapshot&select=raw_text&order=created_at.desc&limit=1`,{headers:H});
+    const j=await r.json(); const raw=Array.isArray(j)&&j[0]&&j[0].raw_text;
+    return raw?JSON.parse(raw):null;
+  }catch(e){ return null; }
+}
 async function loadPrevTotals(){
   try{
     const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`};
@@ -317,8 +333,17 @@ async function loadPrevTotals(){
 }
 async function sbWrite(dataStr){
   const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
-  await fetch(`${SB_URL}/rest/v1/invoices?source=eq.milestones-snapshot`,{method:'DELETE',headers:{...H,Prefer:'return=minimal'}});
+  // Insert FIRST, then prune. The old delete-then-insert left zero good snapshots
+  // if the run died mid-write, and destroyed the baseline the guard depends on.
   await fetch(`${SB_URL}/rest/v1/invoices`,{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({trainer_name:'__milestones__',period_start:today,period_end:today,source:'milestones-snapshot',status:'data',raw_text:dataStr,created_by:'weekly-sync'})});
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/invoices?source=eq.milestones-snapshot&select=id&order=created_at.desc`,{headers:H});
+    const rows=await r.json();
+    if(Array.isArray(rows)&&rows.length>5){
+      const old=rows.slice(5).map(x=>x.id).filter(x=>x!=null);
+      if(old.length) await fetch(`${SB_URL}/rest/v1/invoices?id=in.(${old.join(',')})`,{method:'DELETE',headers:{...H,Prefer:'return=minimal'}});
+    }
+  }catch(e){}
 }
 export default async()=>{
   if(!GROUP_ID||!TOKEN||!SB_URL||!SB_KEY) return new Response(JSON.stringify({ok:false,error:'missing env'}),{status:500});

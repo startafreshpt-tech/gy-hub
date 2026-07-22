@@ -164,6 +164,22 @@ const DATA=window.__DATA__;
 const S=DATA.summary, M=DATA.members, fmt=n=>n.toLocaleString();
 document.getElementById('sub').textContent=`Group 6611 · ${S.total_members} active members · generated ${S.generated}`;
 
+// Data-health banner. A degraded sync must announce itself rather than quietly
+// showing plausible-looking numbers.
+(function(){
+  const h=S.health||{}; const alerts=(h.alerts||[]).slice();
+  const carried=h.carried_forward||0;
+  if(!alerts.length && !carried) return;
+  const el=document.createElement('div');
+  el.style.cssText='margin:12px 0;padding:10px 14px;border-radius:8px;border:1px solid #f59e0b;background:#fffbeb;color:#78350f;font-size:13px;line-height:1.5';
+  const bits=[];
+  if(alerts.length) bits.push('<b>Sync warnings:</b> '+alerts.map(a=>String(a).replace(/</g,'&lt;')).join(' · '));
+  if(carried) bits.push(`<b>${carried}</b> member${carried>1?'s':''} kept previous values because Trainerize didn't return data this run (nothing was lost).`);
+  el.innerHTML=bits.join('<br>');
+  const sub=document.getElementById('sub');
+  if(sub&&sub.parentNode) sub.parentNode.insertBefore(el,sub.nextSibling);
+})();
+
 document.getElementById('kpis').innerHTML=[
  ['Active members',fmt(S.total_members),''],
  ['Workouts this month',fmt(S.workouts_month),`target ${S.workouts_month_target}`],
