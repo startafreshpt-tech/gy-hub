@@ -71,5 +71,31 @@ eq('no stats -> 0',        badgeOf([]), 0);
   ok('no phantom club entry', r.lifetime<100);
 }
 
+
+// --- bodystat failure semantics -------------------------------------------
+// A throttled /bodystats/get used to return null, identical to "no measurements".
+// That wiped the all-time baseline and let the short recent window be published as
+// the all-time loss (April Van Berkum: 20.9kg -> 3.8kg). Failure must be explicit.
+function bodystatResult(apiResp){
+  if(apiResp&&apiResp.code===200){const bm=apiResp.bodyMeasures||{};return{bw_lb:bm.bodyWeight??null};}
+  return {_failed:true};
+}
+function collect(resp){ const r=bodystatResult(resp); return r&&r._failed ? {value:null,failed:true} : {value:r.bw_lb,failed:false}; }
+
+eq('429 is a failure, not empty data', collect({_http:429}), {value:null,failed:true});
+eq('network error is a failure',       collect({_err:'boom'}),  {value:null,failed:true});
+eq('null response is a failure',       collect(null),           {value:null,failed:true});
+eq('genuine empty reading is NOT a failure', collect({code:200,bodyMeasures:{}}), {value:null,failed:false});
+eq('real reading passes through',      collect({code:200,bodyMeasures:{bodyWeight:210}}), {value:210,failed:false});
+
+// The all-time figure must never be replaced by a smaller recent-window number
+// when a real all-time baseline exists.
+function chooseLoss(appLoss,calLoss){
+  return (appLoss!=null&&appLoss>0&&(calLoss==null||appLoss>calLoss)) ? appLoss : calLoss;
+}
+eq('keeps larger all-time over recent window', chooseLoss(3.8,20.9), 20.9);
+eq('recent window wins only when genuinely bigger', chooseLoss(16.9,12.0), 16.9);
+eq('recent used when no all-time pair exists', chooseLoss(3.8,null), 3.8);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail?1:0);

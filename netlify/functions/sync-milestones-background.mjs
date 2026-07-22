@@ -42,7 +42,11 @@ const parseD=s=>{const t=Date.parse((s||'').slice(0,10));return Number.isNaN(t)?
 function chunks(startISO,endISO,maxDays=360){const out=[];let s=new Date(startISO);const end=new Date(endISO);
   while(s<=end){const e=new Date(s);e.setDate(e.getDate()+maxDays);if(e>end)e.setTime(end.getTime());out.push([iso(s),iso(e)]);s=new Date(e);s.setDate(s.getDate()+1);}return out;}
 async function bodystat(uid,date){const r=await api('/bodystats/get',{userID:uid,date,unitBodystats:'cm',unitWeight:'lbs'});
-  if(r&&r.code===200){const bm=r.bodyMeasures||{};return{bw_lb:bm.bodyWeight??null,bf:bm.bodyFatPercent??null,waist:bm.waist??null,date:(r.date||'').slice(0,10)};}return null;}
+  if(r&&r.code===200){const bm=r.bodyMeasures||{};return{bw_lb:bm.bodyWeight??null,bf:bm.bodyFatPercent??null,waist:bm.waist??null,date:(r.date||'').slice(0,10)};}
+  // Throttled/failed. Returning null here used to look identical to "no measurements",
+  // which silently wiped the all-time baseline and let the short recent window be
+  // reported as the all-time loss (April 20.9kg -> 3.8kg).
+  return{_failed:true};}
 const round1=x=>x==null?null:Math.round(x*10)/10;
 function clampBW(a){const lo=35/0.45359237,hi=250/0.45359237,bad=x=>x!=null&&(x<lo||x>hi);if(bad(a.first_bw_lb)||bad(a.bw_now_lb)){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}if(a.first_bw_lb!=null&&a.bw_now_lb!=null){const ch=Math.abs((a.first_bw_lb-a.bw_now_lb)*0.45359237);if(ch>60){a.first_bw_lb=null;a.bw_now_lb=null;a.wt_loss_kg=null;}}}
 const num=x=>{const n=Number(x);return Number.isFinite(n)?n:null;};
@@ -70,20 +74,21 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   // from "this member has no workouts" -- that is how Sharron Booth came back as all
   // zeros and dropped off every board. Flag it so the member can be retried.
   let fetchFailed=false;
+  const bstat=async(u,d)=>{const r=await bodystat(u,d); if(r&&r._failed){fetchFailed=true;return null;} return r;};
   for(const[cs,ce]of chunks(start,today)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});
     if(!d||d._err||d._http||!('calendar' in d)){fetchFailed=true;continue;}
     for(const day of(d&&d.calendar)||[])for(const it of day.items||[]){if(it.type==='workoutRegular'&&it.status==='tracked')wDates.push(day.date);else if(it.type==='cardio'&&it.status==='tracked')cDates.push(day.date);else if(it.type==='bodyStat')bDates.push(day.date);}}
   const cntSince=(arr,c)=>arr.filter(x=>x>=c).length;
   const bs=[...new Set(bDates.filter(parseD))].sort();
   let bw_now=null,bf_now=null,bw_prev=null,dt_now=null,dt_prev=null,waist_now=null,waist_first=null;
-  if(bs.length){dt_now=bs[bs.length-1];const last=await bodystat(uid,dt_now);if(last){bw_now=last.bw_lb;bf_now=last.bf;waist_now=last.waist;}
+  if(bs.length){dt_now=bs[bs.length-1];const last=await bstat(uid,dt_now);if(last){bw_now=last.bw_lb;bf_now=last.bf;waist_now=last.waist;}
     const target=iso(new Date(parseD(dt_now).getTime()-28*864e5));const prior=bs.filter(x=>x<=target);const cand=prior.length?prior[prior.length-1]:(bs.length>1?bs[0]:null);
-    if(cand&&cand!==dt_now){dt_prev=cand;const p=await bodystat(uid,dt_prev);if(p)bw_prev=p.bw_lb;}}
+    if(cand&&cand!==dt_now){dt_prev=cand;const p=await bstat(uid,dt_prev);if(p)bw_prev=p.bw_lb;}}
   let wt_loss=null,age=null;
   if(bw_now!=null&&bw_prev!=null&&dt_now&&dt_prev){wt_loss=round1((bw_prev-bw_now)*LB2KG);age=Math.round((TODAY-parseD(dt_now))/864e5);}
   let first_bw=null,first_date=null;
-  if(bs.length){first_date=bs[0];if(first_date!==dt_now){const f=await bodystat(uid,first_date);if(f){first_bw=f.bw_lb;waist_first=f.waist;}}}
-  async function baseline(cut){const pre=bs.filter(x=>x<cut);const post=bs.filter(x=>x>=cut&&x<dt_now);const base=pre.length?pre[pre.length-1]:(post.length?post[0]:null);if(!base)return null;const b=await bodystat(uid,base);return b?b.bw_lb:null;}
+  if(bs.length){first_date=bs[0];if(first_date!==dt_now){const f=await bstat(uid,first_date);if(f){first_bw=f.bw_lb;waist_first=f.waist;}}}
+  async function baseline(cut){const pre=bs.filter(x=>x<cut);const post=bs.filter(x=>x>=cut&&x<dt_now);const base=pre.length?pre[pre.length-1]:(post.length?post[0]:null);if(!base)return null;const b=await bstat(uid,base);return b?b.bw_lb:null;}
   let ytd=null,mtd=null;
   if(dt_now&&bw_now!=null){if(dt_now>=jan1){const b=await baseline(jan1);if(b!=null)ytd=round1((b-bw_now)*LB2KG);}if(dt_now>=monthStart){const b=await baseline(monthStart);if(b!=null)mtd=round1((b-bw_now)*LB2KG);}}
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const ex=extractAccomplishments(acc&&acc.stats);const yA=parseD(m.created);
@@ -94,11 +99,11 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
     bw_now_lb:bw_now,bw_prev_lb:bw_prev,bs_date_now:dt_now,bs_date_prev:dt_prev,first_bw_lb:first_bw,first_date,
     waist_now:num(waist_now),waist_first:num(waist_first),_srecs:ex.srecs,_habit:ex.habit};}
 async function getDeactivated(){const all=[];for(const start of[0,1000]){const d=await api('/user/getClientList',{view:'deactivatedClient',start,count:1000,verbose:true});for(const u of(d&&d.users)||[])all.push(u);}const seen=new Map();for(const u of all)seen.set(u.id,u);return[...seen.values()];}
-async function processDeactivated(m){const uid=m.id;const name=`${m.firstName||''} ${m.lastName||''}`.trim();const last=await bodystat(uid,'last');
+async function processDeactivated(m){const uid=m.id;const name=`${m.firstName||''} ${m.lastName||''}`.trim();const last0=await bodystat(uid,'last');const last=(last0&&last0._failed)?null:last0;
   if(!last||last.bw_lb==null)return{id:uid,name,data:false};
   let firstDate=null;for(const[cs,ce]of chunks('2015-01-01',last.date)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});const ds=[];for(const day of(d&&d.calendar)||[])for(const it of day.items||[])if(it.type==='bodyStat')ds.push(day.date);if(ds.length){firstDate=ds.sort()[0];break;}}
   if(!firstDate||firstDate===last.date)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
-  const f=await bodystat(uid,firstDate);if(!f||f.bw_lb==null)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
+  const f0=await bodystat(uid,firstDate);const f=(f0&&f0._failed)?null:f0;if(!f||f.bw_lb==null)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const habit=extractAccomplishments(acc&&acc.stats).habit;
   return{id:uid,name,data:true,first_kg:round1(f.bw_lb*LB2KG),last_kg:round1(last.bw_lb*LB2KG),loss_kg:round1((f.bw_lb-last.bw_lb)*LB2KG),first:firstDate,last:last.date,_habit:habit};}
 const saneWt=(f,l,loss)=>f!=null&&l!=null&&f>=35&&f<=250&&l>=35&&l<=250&&loss>0&&loss<=50;
@@ -135,9 +140,11 @@ async function buildDATA(){
   const activeRaw=await getActive();const active=await pool(activeRaw,processActive);
   // Retry anyone whose calendar fetch was throttled, one at a time with breathing
   // room. Without this a rate-limited member silently reports zero of everything.
-  let calRetried=0, calStillFailed=0;
+  let calRetried=0, calStillFailed=0, calSkipped=0;
+  const RETRY_CAP=120;   // bound the serial retries so a mass-throttle can't blow the job timeout
   for(let i=0;i<active.length;i++){
     if(!active[i]||!active[i]._failed) continue;
+    if(calRetried>=RETRY_CAP){ calSkipped++; continue; }
     await sleep(500);
     calRetried++;
     try{
@@ -229,7 +236,8 @@ async function buildDATA(){
     a.combined=(a.lifetime||0)+(a.activities||0);
   }
   globalThis.__dbgSumm={generated:new Date().toISOString(),active:active.length,
-    calendar_retried:calRetried,calendar_still_failed:calStillFailed,
+    calendar_retried:calRetried,calendar_still_failed:calStillFailed,calendar_retry_skipped:calSkipped,
+    weak_baseline:active.filter(a=>a&&a._failed).length,
     summary_failed_after_retry:summaryFails.length,failed_sample:summaryFails.slice(0,10),
     raised_by_badge:floorBadge,raised_by_prev_snapshot:floorPrev,
     zero_lifetime:active.filter(a=>!(a.lifetime>0)).length,
