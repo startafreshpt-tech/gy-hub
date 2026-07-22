@@ -25,8 +25,15 @@ async function api(path,body,retries=3){
   }
 }
 const emailsFrom=arr=>(arr||[]).map(u=>String(u.email||'').toLowerCase().trim()).filter(e=>e.includes('@'));
-async function getActiveEmails(){const all=[];for(let start=0;;start+=200){const d=await api('/user/getList',{start,count:200});const u=(d&&d.users)||[];all.push(...u);if(u.length<200)break;}return new Set(emailsFrom(all));}
-async function getDeactivatedEmails(){const all=[];for(const start of[0,1000,2000,3000]){const d=await api('/user/getClientList',{view:'deactivatedClient',start,count:1000,verbose:true});const u=(d&&d.users)||[];all.push(...u);if(u.length<1000)break;}return emailsFrom(all);}
+// A failed page used to yield [] and break the loop early, silently truncating the
+// list -- which would misclassify active clients as deactivated. Abort instead:
+// leaving last week's data in place is far safer than publishing a partial list.
+async function getActiveEmails(){const all=[];for(let start=0;;start+=200){const d=await api('/user/getList',{start,count:200});
+  if(!d||!Array.isArray(d.users)) throw new Error(`getList failed at start=${start} — aborting rather than publishing a truncated active list`);
+  const u=d.users;all.push(...u);if(u.length<200)break;}return new Set(emailsFrom(all));}
+async function getDeactivatedEmails(){const all=[];for(const start of[0,1000,2000,3000]){const d=await api('/user/getClientList',{view:'deactivatedClient',start,count:1000,verbose:true});
+  if(!d||!Array.isArray(d.users)) throw new Error(`getClientList failed at start=${start} — aborting rather than publishing a truncated deactivated list`);
+  const u=d.users;all.push(...u);if(u.length<1000)break;}return emailsFrom(all);}
 async function sbWriteBlob(source,dataStr){
   const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
   const today=new Date().toISOString().slice(0,10);
