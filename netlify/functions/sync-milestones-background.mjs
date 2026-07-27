@@ -345,9 +345,36 @@ async function sbWrite(dataStr){
     }
   }catch(e){}
 }
+
+// TEMP diagnostic: find which Trainerize field carries the per-client trainer
+// assignment, so the follow-up can use Trainerize (not GymMaster sessions) as the
+// source of truth for who belongs to whom.
+async function probeTrainerAssignment(){
+  const out={endpoints:{}};
+  // 1) a verbose client record — dump its keys + any trainer-ish field
+  try{
+    const d=await api('/user/getClientList',{view:'activeClient',start:0,count:3,verbose:true});
+    const u=(d&&d.users)||[];
+    out.getClientList_keys = u[0]?Object.keys(u[0]):null;
+    out.getClientList_sample = u[0]?JSON.stringify(u[0]).slice(0,1500):null;
+    out.getClientList_trainerish = u.map(x=>{const o={};for(const k of Object.keys(x||{})) if(/train|coach|assign|owner|staff/i.test(k)) o[k]=x[k]; return {id:x.id,name:x.name||`${x.firstName||''} ${x.lastName||''}`.trim(),...o};});
+  }catch(e){ out.getClientList_err=String(e).slice(0,200); }
+  // 2) master list of trainers, if the endpoint exists
+  for(const p of ['/trainer/getList','/user/getTrainerList','/trainer/getClientList']){
+    try{ const d=await api(p,{start:0,count:50}); out.endpoints[p]=d?JSON.stringify(d).slice(0,600):null; }catch(e){ out.endpoints[p]=String(e).slice(0,120); }
+  }
+  // 3) a single full user record
+  try{
+    const first=((await api('/user/getClientList',{view:'activeClient',start:0,count:1,verbose:true}))||{}).users||[];
+    if(first[0]){ const full=await api('/user/get',{userID:first[0].id}); out.user_get_keys=full?Object.keys(full):null; out.user_get_sample=full?JSON.stringify(full).slice(0,1500):null; }
+  }catch(e){ out.user_get_err=String(e).slice(0,200); }
+  const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
+  await fetch(`${SB_URL}/rest/v1/invoices?source=eq.debug-tz-assignment`,{method:'DELETE',headers:{...H,Prefer:'return=minimal'}});
+  await fetch(`${SB_URL}/rest/v1/invoices`,{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({trainer_name:'__debug-tz-assignment__',period_start:today,period_end:today,source:'debug-tz-assignment',status:'data',raw_text:JSON.stringify(out),created_by:'debug'})});
+}
 export default async()=>{
   if(!GROUP_ID||!TOKEN||!SB_URL||!SB_KEY) return new Response(JSON.stringify({ok:false,error:'missing env'}),{status:500});
-  try{ const DATA=await buildDATA(); await sbWrite(JSON.stringify(DATA));
+  try{ try{ await probeTrainerAssignment(); }catch(e){} const DATA=await buildDATA(); await sbWrite(JSON.stringify(DATA));
     try{ const today2=new Date().toISOString().slice(0,10); const H={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'}; await fetch(`${SB_URL}/rest/v1/invoices?source=eq.debug-milestones`,{method:'DELETE',headers:{...H,Prefer:'return=minimal'}}); await fetch(`${SB_URL}/rest/v1/invoices`,{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({trainer_name:'__debug-milestones__',period_start:today2,period_end:today2,source:'debug-milestones',status:'data',raw_text:JSON.stringify(globalThis.__dbgSumm||{none:true}),created_by:'debug'})}); }catch(e){}
     return new Response(JSON.stringify({ok:true,members:DATA.members.length,generated:DATA.summary.generated}),{headers:{'content-type':'application/json'}});
   }catch(e){ return new Response(JSON.stringify({ok:false,error:String(e)}),{status:500}); }
