@@ -241,7 +241,12 @@ async function genExpected(){
   const {data:manual}=await sb.from('manual_sessions').select('*').eq('trainer_name',trainer).gte('session_date',from).lte('session_date',to);
   (manual||[]).forEach(ms=>S.push({session_date:ms.session_date,client_name:ms.client_name,session_kind:ms.session_kind||'individual',billable_minutes:ms.billable_minutes,attended:true,start_time:'',service_type:'(manual) '+ms.client_name,gm_booking_id:'manual-'+ms.id}));
   const dedupe=arr=>{const seen=new Set();return arr.filter(s=>{const k=natKey(s);if(seen.has(k))return false;seen.add(k);return true;});};
-  const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind));
+  // A cancelled / no-show booking did not happen — exclude it from billing, the
+  // booked count AND the 'not checked in' list (that list is for forgotten
+  // check-ins, not cancellations). Manisha Dharvotkar's standing fortnightly slot
+  // is cancelled every time, which is why it kept appearing as 'not in'.
+  const isDead=s=>/cancel|no[\s-]?show/i.test(s.result_text||'');
+  const oneRows=S.filter(s=>['individual','onboard','couple'].includes(s.session_kind)&&!isDead(s));
   const isGavynClient=s=>/\bgavyn\b/i.test(s.client_name||'');
   const oneAttDed=dedupe(oneRows.filter(s=>s.attended||isGavynClient(s))), oneAllDed=dedupe(oneRows); // Gavyn-as-client counts even if not checked in
   const one$=oneAttDed.reduce((a,s)=>a+(Number(s.billable_minutes||0)/60)*rate,0);
