@@ -444,9 +444,14 @@ async function syncNow(){$('#sm').textContent='Started — runs in background a 
 async function saveCheck(){
   const e=STATE.expected;if(!e){const el=$('#saveMsg');if(el)el.textContent='Generate expected first.';return;}
   const a=STATE.actual;const diff=(a&&a.invoiced!=null)?(a.invoiced-e.total):null;
+  // Capture the full itemised line-items so Records shows exactly what this page shows.
+  const items=(e._billRows||[]).map((r,i)=>({date:r.date,time:r.time,client:r.client,group:r.group,label:labelOf(r.group),mins:r.mins,att:!!r.att,notChecked:!!r.notChecked,excluded:e._excluded.has(i),amt:rowAmtG(r,e.rate)}));
+  const billed=items.filter(x=>!x.excluded);
+  const sumG=g=>billed.filter(x=>x.group===g).reduce((s2,x)=>s2+x.amt,0);
+  const breakdown={one:['m30','m45','m60'].reduce((s2,g)=>s2+sumG(g),0),pod:sumG('pod'),sqd:sumG('sqd'),admin:Number(e._adminEx||0),gst:Number(e.gstAmt||0),holiday:Number(e.holiday||0),total:Number(e.total||0),rate:e.rate};
   const row={trainer_name:e.trainer,period_start:e.from,period_end:e.to,source:'check',status:'reviewed',
     notes:`Expected ${money(e.total)}`+((a&&a.invoiced!=null)?`; Invoiced ${money(a.invoiced)}; Diff ${money(diff)}`:'; (no invoice uploaded)'),
-    raw_text:JSON.stringify({expected:e.total,invoiced:a?a.invoiced:null,diff,sheet:a?a.sheet:null,oneCheckedIn:e.oneAttCount,oneBooked:e.oneBookedCount}),
+    raw_text:JSON.stringify({expected:e.total,invoiced:a?a.invoiced:null,diff,sheet:a?a.sheet:null,oneCheckedIn:e.oneAttCount,oneBooked:e.oneBookedCount,breakdown,items}),
     created_by:STATE.user.email};
   const {error}=await sb.from('invoices').insert(row);
   const el=$('#saveMsg');if(el)el.textContent=error?('Save failed: '+error.message):'Saved ✓ (see Records tab)';
@@ -470,12 +475,30 @@ function recOpen(id){
   if(!row.classList.contains('hidden')){row.classList.add('hidden');return;}
   let d={};try{d=JSON.parse(r.raw_text||'{}');}catch(e){}
   row.classList.remove('hidden');
+  const items=Array.isArray(d.items)?d.items:[];
+  const bd=d.breakdown||{};
+  const isCo=g=>['m30','m45','m60'].includes(g);
+  const itemRows=items.map(it=>{const grey=it.notChecked||it.excluded;const attCell=isCo(it.group)?(it.att?'<span style="color:#15803d">\u2714</span>':'<span style="color:#b91c1c;font-weight:600">\u2718 not in</span>'):(it.excluded?'<span class="muted">excluded</span>':'');
+    return `<tr style="${grey?'color:#94a3b8':''}"><td>${it.date}</td><td>${it.time||''}</td><td>${it.client}</td><td>${it.label||labelOf(it.group)}</td><td class="small">${attCell}</td><td class="num">${it.excluded?'<span class="muted">'+money(it.amt)+'</span>':money(it.amt)}</td></tr>`;}).join('')||'<tr><td colspan="6" class="muted">No line items saved for this check.</td></tr>';
+  const line=(lbl,val)=>`<tr><td colspan="5" style="text-align:right">${lbl}</td><td class="num">${money(val)}</td></tr>`;
   recCell(id).innerHTML=`<div style="padding:10px 6px" class="small">
     <b>${r.trainer_name}</b> · ${r.period_start} → ${r.period_end} · saved by ${r.created_by||'—'}<br>
-    Expected: <b>${d.expected!=null?money(d.expected):'—'}</b> · Invoiced: <b>${d.invoiced!=null?money(d.invoiced):'—'}</b> · Difference: <b>${d.diff!=null?money(d.diff):'—'}</b><br>
-    ${d.sheet?('Invoice file: '+d.sheet+'<br>'):''}
-    ${d.oneCheckedIn!=null?('1-on-1 checked in: '+d.oneCheckedIn+' of '+d.oneBooked+' booked<br>'):''}
-    Notes: ${r.notes||'—'}</div>`;
+    Expected: <b>${d.expected!=null?money(d.expected):'—'}</b> · Invoiced: <b>${d.invoiced!=null?money(d.invoiced):'—'}</b> · Difference: <b>${d.diff!=null?money(d.diff):'—'}</b>
+    ${d.sheet?(' · Invoice file: '+d.sheet):''}
+    ${d.oneCheckedIn!=null?(' · 1-on-1 checked in: '+d.oneCheckedIn+' of '+d.oneBooked+' booked'):''}<br>
+    Notes: ${r.notes||'—'}
+    <div class="panel" style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>Date</th><th>Time</th><th>Client</th><th>Type</th><th>Att</th><th class="num">$</th></tr></thead>
+    <tbody>${itemRows}
+    ${bd.one!=null?line('1-on-1 coaching',bd.one):''}
+    ${bd.pod?line('Pods',bd.pod):''}
+    ${bd.sqd?line('Squads',bd.sqd):''}
+    ${bd.admin?line('Admin',bd.admin):''}
+    ${bd.gst?line('GST 15%',bd.gst):''}
+    ${bd.holiday?line('Holiday pay',bd.holiday):''}
+    <tr style="font-weight:700"><td colspan="5" style="text-align:right">Expected total</td><td class="num">${money(d.expected!=null?d.expected:(bd.total||0))}</td></tr>
+    </tbody></table></div>
+    <p class="small muted" style="margin-top:4px">\u2714 checked in · \u2718 not in = booked but not checked in (greyed, not billed) · excluded = you unticked it.</p>
+  </div>`;
 }
 function recEdit(id){
   const r=RECS.find(x=>x.id===id);const row=document.getElementById('rd-'+id);if(!row)return;
