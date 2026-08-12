@@ -77,8 +77,12 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
   let fetchFailed=false;
   const bstat=async(u,d)=>{const r=await bodystat(u,d); if(r&&r._failed){fetchFailed=true;return null;} return r;};
   for(const[cs,ce]of chunks(start,today)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});
-    if(!d||d._err||d._http||!('calendar' in d)){fetchFailed=true;continue;}
-    for(const day of(d&&d.calendar)||[])for(const it of day.items||[]){if(it.type==='workoutRegular'&&it.status==='tracked')wDates.push(day.date);else if(it.type==='cardio'&&it.status==='tracked')cDates.push(day.date);else if(it.type==='bodyStat')bDates.push(day.date);}}
+    // ONLY a real HTTP/network error is a failure. A successful response that simply
+    // has no 'calendar' key means the member had no workouts in this period — that is
+    // valid empty data, not a fetch failure, and must NOT flag the member.
+    if(!d||d._err||d._http||typeof d!=='object'){fetchFailed=true;continue;}
+    const cal=Array.isArray(d.calendar)?d.calendar:[];
+    for(const day of cal)for(const it of day.items||[]){if(it.type==='workoutRegular'&&it.status==='tracked')wDates.push(day.date);else if(it.type==='cardio'&&it.status==='tracked')cDates.push(day.date);else if(it.type==='bodyStat')bDates.push(day.date);}}
   const cntSince=(arr,c)=>arr.filter(x=>x>=c).length;
   const bs=[...new Set(bDates.filter(parseD))].sort();
   let bw_now=null,bf_now=null,bw_prev=null,dt_now=null,dt_prev=null,waist_now=null,waist_first=null;
