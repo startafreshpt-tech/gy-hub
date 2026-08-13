@@ -165,5 +165,21 @@ const CUT = '2025-12-01';
   eq('empty row produces nothing', rows.length, 0);
 }
 
+
+// Check-in override: a portal booking time ("1:30 pm") and report #9's seconds-since
+// -midnight (48600) must yield the SAME synthId, or the override can't find the row.
+function timeToSec(t){const s=String(t==null?'':t).trim();if(!s)return null;const m=s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]m)?/i);if(!m){const n=/^\d+$/.test(s)?Number(s):NaN;return Number.isFinite(n)&&n>=0&&n<86400?n:null;}let h=+m[1];const mn=+m[2],sec=+(m[3]||0),ap=(m[4]||'').toLowerCase();if(ap==='pm'&&h!==12)h+=12;if(ap==='am'&&h===12)h=0;return h*3600+mn*60+sec;}
+{
+  const report9Sec=48600; // 13:30 from sorted_Booking Start Time
+  eq('portal 1:30 pm -> 48600s', timeToSec('1:30 pm'), 48600);
+  eq('id from report#9 seconds == id from portal time',
+     synthId(799856,'2026-07-23',report9Sec), synthId(799856,'2026-07-23',timeToSec('1:30 pm')));
+  eq('24h format matches too', timeToSec('13:30'), 48600);
+  eq('am handled', timeToSec('8:00 am'), 28800);
+  eq('midnight 12am -> 0', timeToSec('12:00 am'), 0);
+  eq('noon 12pm -> 43200', timeToSec('12:00 pm'), 43200);
+  ok('unparseable time -> null', timeToSec('')===null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

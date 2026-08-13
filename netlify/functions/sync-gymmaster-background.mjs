@@ -150,6 +150,20 @@ async function fetchAppointments(startDate, endDate) {
 // booking records, so report #9 returns two rows for the same member+date+time.
 // Rank results so we always keep the one that reflects reality: a "Showed" beats a
 // bare "Booking", which beats a "No show"/"Cancelled".
+// Portal bookings give the real CHECK-IN flag (b.attended), which report #9's
+// "Booking Result" does NOT reflect (a checked-in session can still read "Booking").
+// Convert a portal start time to seconds-since-midnight so we can rebuild the same
+// synthId and override the appointment row's attended flag.
+function timeToSec(t) {
+  const s = String(t == null ? '' : t).trim();
+  if (!s) return null;
+  const m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]m)?/i);
+  if (!m) { const n = /^\d+$/.test(s) ? Number(s) : NaN; return Number.isFinite(n) && n >= 0 && n < 86400 ? n : null; }
+  let h = +m[1]; const mn = +m[2], sec = +(m[3] || 0), ap = (m[4] || '').toLowerCase();
+  if (ap === 'pm' && h !== 12) h += 12;
+  if (ap === 'am' && h === 12) h = 0;
+  return h * 3600 + mn * 60 + sec;
+}
 function resultRank(result) {
   const t = String(result || '').toLowerCase();
   if (/^\s*showed/.test(t)) return 3;      // Showed / Showed late -> attended
@@ -312,6 +326,7 @@ export default async () => {
   let scanned = 0, upserted = 0;
   const holdsOut = [];
   const coachVotes = {};            // memberId -> { TrainerName: count, _email }
+  const checkinIds = new Set();     // synthIds that the portal marks as CHECKED IN (b.attended)
   const nextBooking = {};           // surnameKey -> { label, date }
   const nextBookingById = {};        // memberId -> { label, date }
   let dbgClass = 0, dbgService = 0, dbgSample = null, dbgRaw = null;
@@ -342,6 +357,19 @@ export default async () => {
         try { const prof = await gmGet(`/portal/api/v1/member/profile?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`); const pr = prof?.result || prof || {}; leadSource = pr.sourcepromotion || pr.source || null; } catch (e) {}
         const pastResp = await gmGet(`/portal/api/v2/member/bookings/past?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
         const past = pastResp.result || [];
+        // Real check-in flag: if the member portal says they attended a 1-on-1, record
+        // its synthId so we can override report #9 (whose result may still say "Booking").
+        for (const b of past) {
+          if (!b || !b.attended) continue;
+          const blob = `${b.name || ''} ${b.type || ''} ${b.staffname || ''}`;
+          if (/squad|\bpod/i.test(blob)) continue;
+          if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
+          const date = String(b.day || '').slice(0, 10);
+          if (!date || date < HISTORY_START) continue;
+          const sec = timeToSec(b.start_str != null ? b.start_str : b.starttime);
+          if (sec == null) continue;
+          checkinIds.add(synthId(m.id, date, sec));
+        }
         const msResp = await gmGet(`/portal/api/v1/member/memberships?api_key=${GYMMASTER_API_KEY}&token=${encodeURIComponent(token)}`);
         const ms = msResp.result || [];
         collectHolds(holdsOut, m, ms);
@@ -405,6 +433,23 @@ export default async () => {
       } catch (e) { /* skip member */ }
     }
 
+    // Override: mark appointment rows CHECKED IN where the member portal says so but
+    // report #9 left the result as "Booking". Only touches rows currently attended=false.
+    let checkinOverrides = 0;
+    const cids = [...checkinIds];
+    for (let i = 0; i < cids.length; i += 150) {
+      const chunk = cids.slice(i, i + 150);
+      try {
+        const resp = await fetch(`${SB}/sessions?gm_booking_id=in.(${chunk.join(',')})&attended=eq.false`, {
+          method: 'PATCH',
+          headers: sbHeaders({ Prefer: 'return=representation' }),
+          body: JSON.stringify({ attended: true, result_text: 'Checked in (portal)' }),
+        });
+        const updated = await resp.json().catch(() => []);
+        if (Array.isArray(updated)) checkinOverrides += updated.length;
+      } catch (e) { /* skip chunk */ }
+    }
+
     // Squads from class schedule (paid regardless of attendance)
     const weeks = Math.ceil(Number(SYNC_LOOKBACK_DAYS) / 7);
     for (let w = 0; w <= weeks; w++) {
@@ -439,7 +484,7 @@ export default async () => {
     }
     if (Object.keys(coachById).length) await sbWriteBlob('member-coaches', JSON.stringify({ updated: new Date().toISOString(), byId: coachById, byEmail: coachByEmail }));
     if (Object.keys(nextBooking).length) await sbWriteBlob('pt-bookings', JSON.stringify({ updated: new Date().toISOString(), bookings: nextBooking, byId: nextBookingById }));
-    await sbWriteBlob('debug-bookings', JSON.stringify({ updated: new Date().toISOString(), classbookings_seen: dbgClass, servicebookings_seen: dbgService, next_found: Object.keys(nextBooking).length, sample: dbgSample, raw: dbgRaw }));
+    await sbWriteBlob('debug-bookings', JSON.stringify({ updated: new Date().toISOString(), classbookings_seen: dbgClass, servicebookings_seen: dbgService, next_found: Object.keys(nextBooking).length, checkin_ids: checkinIds.size, checkin_overrides: checkinOverrides, sample: dbgSample, raw: dbgRaw }));
     await sbPatch('sync_log', `id=eq.${logId}`, {
       finished_at: new Date().toISOString(), members_scanned: scanned,
       sessions_upserted: upserted, status: 'ok',
