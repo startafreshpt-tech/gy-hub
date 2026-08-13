@@ -78,6 +78,11 @@ const ADMIN_CAP={Caron:1.0,Ethan:2.5,Laura:1.5,Natalie:1.5};
 const GST_TRAINERS=['Gavyn','Ethan']; const GST=0.15; // Scott salaried; Laura casual employee; Caron not GST-registered (all no GST)
 const EMPLOYEES=['Laura']; const HOLIDAY_PCT=0.08; // casual employees: 8% holiday pay, no GST
 const CASELOAD={Gavyn:64,Scott:91,Caron:6,Ethan:49,Laura:22,Natalie:24}; // current Trainerize client numbers
+// Capacity / occupancy. Available hours = contracted − a daily lunch break.
+const CONTRACTOR_RATE=50;                                   // $/hr, studio contractor rate
+const CAP_CONTRACT_HRS={Scott:37.5};                       // contracted hours/wk per employee
+const CAP_LUNCH_MIN=30, CAP_WORK_DAYS=5;                    // 30-min lunch each working day
+const capAvail=t=>{const h=CAP_CONTRACT_HRS[t]; return h?+(h-(CAP_LUNCH_MIN/60)*CAP_WORK_DAYS).toFixed(2):null;};
 function toMin(t){const m=String(t||'').trim().match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]m)?/i);if(!m)return 'x'+String(t||'');let h=+m[1];const mn=+m[2];const ap=(m[3]||'').toLowerCase();if(ap==='pm'&&h!==12)h+=12;if(ap==='am'&&h===12)h=0;return h*60+mn;}
 function natKey(s){return (s.client_name||'').trim().toLowerCase()+'|'+s.session_date+'|'+toMin(s.start_time)+'|'+s.session_kind+'|'+(Number(s.billable_minutes)||0);}
 let STATE={user:null,tab:'check',trainers:[],expected:null,actual:null};
@@ -272,6 +277,31 @@ async function genExpected(){
     ...dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>({date:s.session_date,time:(s.start_time||'').slice(0,5),client:(s.client_name||'Discovery call'),group:'sales',mins:Number(s.billable_minutes||30),sig:sigOf(s),att:true})),
   ].sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   const salesRows=dedupe(S.filter(s=>s.session_kind==='sales')).map(s=>{const nm=s.client_name||'';const ci=cmap[(nm||'').toLowerCase()]||{};const sg=sigOf(s);const sv=slog[sg]||{};return{date:s.session_date,person:nm||'Discovery call',lead:(sv.lead!=null?sv.lead:(ci.lead||'')),membership:ci.membership||'',cash:(sv.cash!=null&&sv.cash!==''?sv.cash:(ci.signup||'')),sig:sg};}).sort((a,b)=>a.date.localeCompare(b.date)).filter(r=>(r.membership&&String(r.membership).trim())||(r.cash!=null&&String(r.cash).replace(/[^0-9.]/g,'')!==''));
+  // ---- Capacity / occupancy (booked vs delivered) ----
+  const AVAIL=capAvail(trainer);   // null for coaches with no contracted hours set
+  let capHTML='';
+  if(AVAIL){
+    const capKinds=['individual','couple','onboard','pod','squad'];
+    const seenSlot=new Set(); let bookedMin=0, delivMin=0;
+    for(const s of S){
+      if(!capKinds.includes(s.session_kind)||isDead(s)) continue;   // cancelled/no-show free the slot
+      const k=s.session_kind+'|'+s.session_date+'|'+(s.start_time||'');
+      if(seenSlot.has(k)) continue; seenSlot.add(k);   // one slot even if a couple = 2 rows
+      const m=Number(s.billable_minutes|| (s.session_kind==='squad'?60:s.session_kind==='pod'?30:30));
+      bookedMin+=m; if(s.attended) delivMin+=m;
+    }
+    const bookedWk=(bookedMin/60)/wks, delivWk=(delivMin/60)/wks;
+    const occB=Math.round(bookedWk/AVAIL*100), occD=Math.round(delivWk/AVAIL*100);
+    const costB=bookedWk*CONTRACTOR_RATE, costD=delivWk*CONTRACTOR_RATE;
+    capHTML=`<div class="panel"><h3>Capacity — ${trainer}</h3>
+      <div class="cards">
+        <div class="card"><div class="k">Occupancy · booked</div><div class="v">${occB}%</div><div class="sub">${bookedWk.toFixed(1)} h/wk of ${AVAIL} available</div></div>
+        <div class="card"><div class="k">Occupancy · delivered</div><div class="v">${occD}%</div><div class="sub">${delivWk.toFixed(1)} h/wk checked-in</div></div>
+        <div class="card"><div class="k">As contractor @ ${money(CONTRACTOR_RATE)}/hr</div><div class="v">${money(costB)}<span class="small">/wk</span></div><div class="sub">${money(costD)}/wk on delivered</div></div>
+      </div>
+      <p class="small muted" style="margin-top:6px">Available = ${CAP_CONTRACT_HRS[trainer]} contracted − ${CAP_LUNCH_MIN}min lunch × ${CAP_WORK_DAYS} days = ${AVAIL} h/wk. Booked = scheduled slots (excl. cancellations) ÷ ${wks} wk${wks>1?'s':''}; delivered = checked-in. Contractor cost is what ${trainer} would bill if paid per hour.</p>
+    </div>`;
+  }
   STATE.expected={trainer,from,to,rate,_salesRows:salesRows,total:grand,totalEx:total,gstAmt,gstable,isEmp,holPct,holiday,oneAttCount:oneAttDed.length,oneBookedCount:oneAllDed.length,_sessions:S,_billRows:billRows,_excluded:new Set(billRows.map((r,i)=>r.notChecked?i:-1).filter(i=>i>=0)),_adminEx:admin$};
   $('#out').innerHTML=`
    <div class="cards">
@@ -280,6 +310,7 @@ async function genExpected(){
      <div class="card"><div class="k">Squads</div><div class="v">${squads.length}</div></div>
      <div class="card"><div class="k">Admin cap</div><div class="v">${adminHrs}h</div><div class="sub">${CASELOAD[trainer]!=null?CASELOAD[trainer]+' clients · ':''}${cap}h/wk</div></div>
    </div>
+   ${capHTML}
    <div style="margin:4px 0 12px"><button class="btn" onclick="downloadInvoiceSheet()">⬇ Download invoice (.xlsx)</button> <button class="btn sec" onclick="saveCheck()">💾 Save this check to records</button> <span id="saveMsg" class="small"></span></div>
    ${oneAllDed.length>oneAttDed.length?`<div class="note">⚠️ ${oneAllDed.length-oneAttDed.length} of ${trainer}'s 1-on-1s were booked but <b>not checked in</b> — so they don't count toward expected. If they happened, ${trainer} needs to check clients in.</div>`:''}
    <div class="panel"><h3>Expected invoice (what GymMaster supports)</h3>
