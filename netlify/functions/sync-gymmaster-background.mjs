@@ -395,12 +395,15 @@ export default async () => {
           const v = (coachVotes[m.id] = coachVotes[m.id] || { _email: m.email });
           v[tr] = (v[tr] || 0) + 1;
         }
-        // Next upcoming 1-on-1 appointment (any trainer).
+        // Next upcoming appointment (any trainer). Count ANY personal booking as
+        // "booked" — coaching, PT, appraisals/assessments/reviews, discovery, etc.
+        // Only genuine group/class or gym-only bookings are excluded. (Cherone Wilson
+        // was flagged "not booked" because her upcoming session was a "Gavyn
+        // Achievement Appraisal", which the old coaching/PT-only filter ignored.)
         let nb = null;
         for (const b of upcoming) {
-          const blob = `${b.name || ''} ${b.type || ''} ${b.staffname || ''}`;
-          if (/squad|\bpod/i.test(blob)) continue;
-          if (!/coaching|^\s*PT\b|PT\s/i.test(blob)) continue;
+          const blob = `${b.name || ''} ${b.type || ''} ${b.staffname || ''} ${b.location || ''}`;
+          if (/squad|\bpod\b|\bclass\b|bootcamp|early ?bird|gym only|general gym|door/i.test(blob)) continue;
           if (!b.day) continue;
           const d = new Date(b.day); if (isNaN(d) || d < today0) continue;
           if (!nb || new Date(b.day) < new Date(nb.day)) nb = { day: b.day };
