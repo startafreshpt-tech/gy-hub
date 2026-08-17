@@ -389,6 +389,11 @@ const PAYHIST_PATH  = path.join(STATE_DIR, 'payment_history.json');
 // churn events have accumulated (see section 3 above).
 // ═══════════════════════════════════════════════════════════════════════════
 const BASELINE_WEIGHTS = {
+  // Attendance is the strongest churn driver in the exit-survey data: usage drops,
+  // then "not worth the money", then they leave (often to a cheaper gym). A paying
+  // member who has stopped showing up is the highest-value flag.
+  visit_gap_long:      3.0,   // paying member, no gym visit in 21+ days (biggest signal)
+  visit_gap_mild:      1.5,   // no gym visit in 10-20 days (attendance slipping)
   payment_failed:      2.5,
   billing_overdue:     2.5,
   tz_never:            2.0,
@@ -406,6 +411,8 @@ const BASELINE_WEIGHTS = {
 /** Map a signal string back to its BASELINE_WEIGHTS key, or null. */
 function signalToKey(sig) {
   const s = String(sig).toLowerCase();
+  if (s.includes('not attending'))       return 'visit_gap_long';
+  if (s.includes('attendance slipping')) return 'visit_gap_mild';
   if (s.includes('payment failed'))      return 'payment_failed';
   if (s.includes('billing overdue'))     return 'billing_overdue';
   if (s.includes('never logged'))        return 'tz_never';
@@ -708,6 +715,18 @@ function scoreGmMember(m, failedIds, missedIds, weights, paymentHistory, today) 
     score += w.payment_count_mid ?? 1.0; signals.push(`${payCount} missed payments`);
   } else if (payCount >= 3) {
     score += w.payment_count_low ?? 0.5; signals.push(`${payCount} missed payments`);
+  }
+
+  // Paying-but-not-using: days since last gym visit for this (active, paying) member.
+  // This is the master churn predictor — everything else is downstream of it.
+  const lastVisit = parseEpoch(m['sorted_Last Visit Date']);
+  if (lastVisit) {
+    const visitGap = daysBetween(today, lastVisit);
+    if (visitGap >= 21) {
+      score += w.visit_gap_long ?? 3.0; signals.push(`Paying but not attending (${visitGap}d since visit)`);
+    } else if (visitGap >= 10) {
+      score += w.visit_gap_mild ?? 1.5; signals.push(`Attendance slipping (${visitGap}d since visit)`);
+    }
   }
 
   const endDate = parseEpoch(m['sorted_Membership End Date']);
