@@ -3,7 +3,20 @@ on:
   schedule:
     - cron: '0 18 * * 0'   # Sun 18:00 UTC ≈ Mon 6am NZT
   workflow_dispatch: {}      # manual "Run workflow" button
+permissions:
+  contents: read             # lets the sync job check out the code
+  actions: write             # lets the keepalive job re-enable this workflow
 jobs:
+  # Keepalive: GitHub switches off scheduled workflows after 60 days with no
+  # repo commits. Re-enabling it every week resets that clock, so the sync
+  # never gets switched off. Runs separately, so it works even if a sync fails.
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-enable this workflow to reset the 60-day inactivity timer
+        run: gh workflow enable weekly-sync.yml --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 60
