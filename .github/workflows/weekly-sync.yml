@@ -2,7 +2,12 @@ name: Weekly data sync
 on:
   schedule:
     - cron: '0 18 * * 0'   # Sun 18:00 UTC ≈ Mon 6am NZT
-  workflow_dispatch: {}      # manual "Run workflow" button
+  workflow_dispatch:          # manual "Run workflow" button
+    inputs:
+      full_history:
+        description: 'One-off: fetch full Trainerize history (only before 23 Oct 2026)'
+        type: boolean
+        default: false
 permissions:
   contents: read             # lets the sync job check out the code
   actions: write             # lets the keepalive job re-enable this workflow
@@ -34,6 +39,7 @@ jobs:
           SUPABASE_URL:         'https://eqevyohstkwqslloqsni.supabase.co'
           TRAINERIZE_GROUP_ID:  '6611'
           SYNC_LOOKBACK_DAYS:   '180'
+          TZ_FULL_HISTORY:      ${{ inputs.full_history && '1' || '0' }}
           # --- the 3 real secrets (add these in repo Settings) ---
           GYMMASTER_API_KEY:         ${{ secrets.GYMMASTER_API_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -43,8 +49,7 @@ jobs:
         env:
           GM_API_KEY:                ${{ secrets.GYMMASTER_API_KEY }}
           GM_BASE:                   'https://growingyounger.gymmasteronline.com'
-          TZ_EMAIL:                  ${{ secrets.TZ_EMAIL }}
-          TZ_PASSWORD:               ${{ secrets.TZ_PASSWORD }}
-          TZ_BASE_URL:               'https://startafreshpt.beta.trainerize.com'
+          TRAINERIZE_GROUP_ID:       '6611'
+          TRAINERIZE_API_TOKEN:      ${{ secrets.TRAINERIZE_API_TOKEN }}
           SUPABASE_URL:              'https://eqevyohstkwqslloqsni.supabase.co'
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
