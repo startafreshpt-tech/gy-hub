@@ -112,3 +112,13 @@ the calibration source. Next signals to add: results-plateau, coach-leaving flag
 - Start a **new chat per task**; say "read CONTEXT.md in gy-hub and <relevant file>".
 - The repo is the source of truth. Update this file when a decision changes.
 - Supabase MCP + the GitHub PAT let me query data and push code directly.
+
+
+## 2026-10-20 — Trainerize API limits (enforced 23 Oct 2026)
+Trainerize now allows 250k calls/month, 180-day lookback, documented endpoints only.
+- Studio Pulse (`scripts/studio-pulse.mjs`) switched from email/password `/user/login` (private app login) to API-token Basic auth, same as the other syncs. TZ_EMAIL / TZ_PASSWORD secrets no longer used — delete them.
+- Milestones sync: calendar and bodystat requests capped to the last 180 days. Active members' all-time loss is preserved by the existing carry-forward in `_snapshot-guard.mjs`; lifetime totals come from `getClientSummary` (no date range).
+- Deactivated clients: results cached in Supabase (`invoices`, source `tz-deact-cache`); each client is processed once, not weekly. Deactivated clients whose last weigh-in is older than 180 days get no new loss figure unless already cached.
+- Concurrency lowered from 4 to 2 (was hitting 429s).
+- `TZ_FULL_HISTORY=1` (workflow input "full_history") lifts the 180-day cap — used once before 23 Oct to seed the cache. Don't use after that date.
+- Estimated usage after change: ~3–4k calls per weekly run (was ~10–15k).
