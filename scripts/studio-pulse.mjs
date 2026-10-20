@@ -549,23 +549,12 @@ async function gmReportAll(reportId, startDate, endDate) {
 }
 
 // ── Trainerize ───────────────────────────────────────────────────────────
-async function tzLogin(creds) {
-  const groupUrl = String(creds.base_url || '')
-    .replace(/^https?:\/\//, '')
-    .split('.')[0];
-  const resp = await fetchJsonWithRetry(`${TZ_API_BASE}/user/login`, {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: creds.email,
-      password: creds.password,
-      rememberMe: true,
-      groupUrl,
-    }),
-  });
-  const token = resp && resp.token && resp.token.access_token;
-  if (!token) throw new Error(`Trainerize login failed: ${JSON.stringify(resp && resp.message ? resp.message : resp)}`);
-  return token;
+async function tzLogin() {
+  // Documented API auth (Basic groupID:apiToken). Replaces the old email/password
+  // /user/login flow, which Trainerize treats as a private endpoint from 23 Oct 2026.
+  const g=process.env.TRAINERIZE_GROUP_ID, t=process.env.TRAINERIZE_API_TOKEN;
+  if(!g||!t) throw new Error('Missing TRAINERIZE_GROUP_ID / TRAINERIZE_API_TOKEN');
+  return 'Basic '+Buffer.from(`${g}:${t}`).toString('base64');
 }
 
 async function tzGetClientList(token) {
@@ -574,7 +563,7 @@ async function tzGetClientList(token) {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: token,
     },
     body: JSON.stringify({ view: 'allActive' }),
   });
@@ -590,7 +579,7 @@ async function tzGetClientSummary(token, userId) {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: token,
     },
     body: JSON.stringify({ userID: userId, unitWeight: 'kg' }),
   });
