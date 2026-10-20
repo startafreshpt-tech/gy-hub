@@ -12,7 +12,7 @@ const SB_URL   = process.env.SUPABASE_URL;
 const SB_KEY   = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE='https://api.trainerize.com/v03';
 const AUTH='Basic '+Buffer.from(`${GROUP_ID}:${TOKEN}`).toString('base64');
-const POOL=4, LB2KG=0.45359237, WIN=45;
+const POOL=2, LB2KG=0.45359237, WIN=45;
 const TODAY=new Date(); TODAY.setHours(0,0,0,0);
 const iso=d=>d.toISOString().slice(0,10);
 const today=iso(TODAY);
@@ -21,6 +21,8 @@ const jan1=`${TODAY.getFullYear()}-01-01`;
 const curMonth=today.slice(0,7);
 const daysAgo=n=>{const d=new Date(TODAY);d.setDate(d.getDate()-n);return iso(d);};
 const d30=daysAgo(30);
+// Trainerize API limit from 23 Oct 2026: max 180-day lookback. TZ_FULL_HISTORY=1 lifts it (one-off seed only).
+const FULL=process.env.TZ_FULL_HISTORY==='1'; const CUT=daysAgo(179);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function api(path,body,retries=3){
   for(let a=0;a<=retries;a++){
@@ -69,7 +71,7 @@ function extractAccomplishments(stats){let pr=0,mil=0,milMax=0,habit_cnt=0,habit
   return{pr,mil,milMax,srecs,habit:{habit_cnt,habit_tot,max_streak,n_habits:names.size,read_daily_goals:rdg}};}
 async function getActive(){const all=[];for(let start=0;;start+=200){const d=await api('/user/getList',{start,count:200});const u=(d&&d.users)||[];all.push(...u);if(u.length<200)break;}return all;}
 async function processActive(m){const uid=m.id;const created=parseD(m.created)||new Date('2016-01-01');
-  const start=iso(created<new Date('2015-01-01')?new Date('2015-01-01'):created);
+  let start=iso(created<new Date('2015-01-01')?new Date('2015-01-01'):created); if(!FULL&&start<CUT)start=CUT;
   const wDates=[],cDates=[],bDates=[];
   // A throttled call returns {_http}/{_err}/null, which used to be indistinguishable
   // from "this member has no workouts" -- that is how Sharron Booth came back as all
@@ -106,7 +108,8 @@ async function processActive(m){const uid=m.id;const created=parseD(m.created)||
 async function getDeactivated(){const all=[];for(const start of[0,1000]){const d=await api('/user/getClientList',{view:'deactivatedClient',start,count:1000,verbose:true});for(const u of(d&&d.users)||[])all.push(u);}const seen=new Map();for(const u of all)seen.set(u.id,u);return[...seen.values()];}
 async function processDeactivated(m){const uid=m.id;const name=`${m.firstName||''} ${m.lastName||''}`.trim();const last0=await bodystat(uid,'last');const last=(last0&&last0._failed)?null:last0;
   if(!last||last.bw_lb==null)return{id:uid,name,data:false};
-  let firstDate=null;for(const[cs,ce]of chunks('2015-01-01',last.date)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});const ds=[];for(const day of(d&&d.calendar)||[])for(const it of day.items||[])if(it.type==='bodyStat')ds.push(day.date);if(ds.length){firstDate=ds.sort()[0];break;}}
+  if(!FULL&&last.date<CUT)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
+  let firstDate=null;for(const[cs,ce]of chunks(FULL?'2015-01-01':CUT,last.date)){const d=await api('/calendar/getList',{userID:uid,startDate:cs,endDate:ce});const ds=[];for(const day of(d&&d.calendar)||[])for(const it of day.items||[])if(it.type==='bodyStat')ds.push(day.date);if(ds.length){firstDate=ds.sort()[0];break;}}
   if(!firstDate||firstDate===last.date)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
   const f0=await bodystat(uid,firstDate);const f=(f0&&f0._failed)?null:f0;if(!f||f.bw_lb==null)return{id:uid,name,data:true,last_kg:round1(last.bw_lb*LB2KG)};
   const acc=await api('/accomplishment/getStatsList',{userID:uid,start:0,count:150});const habit=extractAccomplishments(acc&&acc.stats).habit;
@@ -215,7 +218,7 @@ async function buildDATA(){
     const base=new Date(firstD); let empty=0;
     for(let mo=1; mo<=15 && empty<2; mo++){
       const d=new Date(base.getFullYear(), base.getMonth()-mo, 1);
-      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
+      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`; if(!FULL&&ds<CUT)break;
       const r=await api('/bodystats/get',{userID:a.id,date:ds,...U});
       const w=r&&r.code===200&&r.bodyMeasures?Number(r.bodyMeasures.bodyWeight):null;
       if(realW(w)){ firstW=w; firstD=ds; empty=0; } else empty++;
@@ -228,7 +231,16 @@ async function buildDATA(){
     clampBW(a);
     delete a._bsA;
   }, 2);
-  const deactRaw=await getDeactivated();const deact=await pool(deactRaw,processDeactivated);
+  const deactRaw=await getDeactivated();
+  // Deactivated history is cached in Supabase (source tz-deact-cache): each client is
+  // only processed once, so we stop re-crawling ~1,460 clients' full history weekly.
+  const CH={apikey:SB_KEY,Authorization:`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
+  let cache={};try{const r=await fetch(`${SB_URL}/rest/v1/invoices?source=eq.tz-deact-cache&select=raw_text&order=created_at.desc&limit=1`,{headers:CH});const j=await r.json();if(j&&j[0])cache=JSON.parse(j[0].raw_text)||{};}catch{}
+  const todo=deactRaw.filter(m=>FULL||!cache[String(m.id)]);
+  for(const v of await pool(todo,processDeactivated))if(v)cache[String(v.id)]=v;
+  const deact=deactRaw.map(m=>cache[String(m.id)]).filter(Boolean);
+  try{const t=iso(new Date());await fetch(`${SB_URL}/rest/v1/invoices?source=eq.tz-deact-cache`,{method:'DELETE',headers:{...CH,Prefer:'return=minimal'}});
+    await fetch(`${SB_URL}/rest/v1/invoices`,{method:'POST',headers:{...CH,Prefer:'return=minimal'},body:JSON.stringify({trainer_name:'__tz-deact-cache__',period_start:t,period_end:t,source:'tz-deact-cache',status:'data',raw_text:JSON.stringify(cache),created_by:'weekly-sync'})});}catch{}
   const PREV=await loadPrevTotals();
   let floorBadge=0, floorPrev=0;
   for(const a of active){
